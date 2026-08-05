@@ -50,3 +50,4 @@ python bot.py
   swap SQLite for a hosted database later.
 - Timezone is hardcoded to UTC+7 (Asia/Phnom_Penh) in `bot.py` — change
   `TIMEZONE_OFFSET_HOURS` if needed.
+"# Telegram_Bot_2" 
