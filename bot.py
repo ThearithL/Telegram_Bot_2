@@ -880,6 +880,8 @@ h1{font-size:22px;margin:0 0 4px;}
 .sub{color:var(--muted);font-size:13px;margin:0 0 28px;}
 .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:18px;}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:18px;}
+.grid2{display:grid;grid-template-columns:1fr 1.3fr;gap:18px;margin-bottom:18px;}
+@media (max-width:700px){.grid2{grid-template-columns:1fr;}}
 .stat{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;}
 .stat .n{font-size:26px;font-weight:700;}
 .stat .l{color:var(--muted);font-size:12px;margin-top:4px;}
@@ -946,13 +948,27 @@ DASHBOARD_HTML = """
 </div>
 
 <div class="card">
-  <h2>Top streaks</h2>
-  {% if top_streaks %}
-  <table><tr><th>Task</th><th>User (chat_id)</th><th>Streak</th><th>Best</th></tr>
-  {% for r in top_streaks %}
-  <tr><td>{{ r.name }}</td><td>{{ r.chat_id }}</td><td>🔥 {{ r.streak }}</td><td>{{ r.best_streak }}</td></tr>
-  {% endfor %}</table>
-  {% else %}<p class="empty">No tasks yet.</p>{% endif %}
+  <h2>Check-ins — last 14 days</h2>
+  <canvas id="checkinChart" height="90"></canvas>
+</div>
+
+<div class="grid2">
+  <div class="card">
+    <h2>Language split</h2>
+    {% if users %}
+    <canvas id="langChart" height="180"></canvas>
+    {% else %}<p class="empty">No users yet.</p>{% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Top streaks</h2>
+    {% if top_streaks %}
+    <table><tr><th>Task</th><th>User (chat_id)</th><th>Streak</th><th>Best</th></tr>
+    {% for r in top_streaks %}
+    <tr><td>{{ r.name }}</td><td>{{ r.chat_id }}</td><td>🔥 {{ r.streak }}</td><td>{{ r.best_streak }}</td></tr>
+    {% endfor %}</table>
+    {% else %}<p class="empty">No tasks yet.</p>{% endif %}
+  </div>
 </div>
 
 <div class="card">
@@ -965,7 +981,44 @@ DASHBOARD_HTML = """
   {% else %}<p class="empty">No users yet.</p>{% endif %}
 </div>
 
-</div></body></html>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<script>
+  const gridColor = "#262a33", textColor = "#8b90a0";
+  Chart.defaults.color = textColor;
+  Chart.defaults.borderColor = gridColor;
+
+  const checkinData = {{ checkin_series_json | safe }};
+  new Chart(document.getElementById('checkinChart'), {
+    type: 'bar',
+    data: {
+      labels: checkinData.labels,
+      datasets: [
+        { label: 'Done', data: checkinData.done, backgroundColor: '#39d98a', stack: 's' },
+        { label: 'Missed', data: checkinData.missed, backgroundColor: '#ff5c72', stack: 's' }
+      ]
+    },
+    options: {
+      responsive: true,
+      scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } } },
+      plugins: { legend: { position: 'bottom' } }
+    }
+  });
+
+  {% if users %}
+  const langData = {{ lang_breakdown_json | safe }};
+  new Chart(document.getElementById('langChart'), {
+    type: 'doughnut',
+    data: {
+      labels: langData.labels,
+      datasets: [{ data: langData.counts, backgroundColor: ['#5b8cff', '#ffb454', '#39d98a'] }]
+    },
+    options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+  });
+  {% endif %}
+</script>
+</body></html>
 """
 
 
@@ -1018,6 +1071,31 @@ def _user_rows():
     return out
 
 
+def _daily_checkin_series(days=14):
+    conn = get_conn()
+    labels, done_counts, missed_counts = [], [], []
+    for i in range(days - 1, -1, -1):
+        d = (datetime.now(TZ) - timedelta(days=i)).strftime("%Y-%m-%d")
+        done = conn.execute("SELECT COUNT(*) c FROM logs WHERE date=? AND done=1", (d,)).fetchone()["c"]
+        missed = conn.execute("SELECT COUNT(*) c FROM logs WHERE date=? AND done=0", (d,)).fetchone()["c"]
+        labels.append(d[5:])  # MM-DD
+        done_counts.append(done)
+        missed_counts.append(missed)
+    conn.close()
+    return {"labels": labels, "done": done_counts, "missed": missed_counts}
+
+
+def _language_breakdown():
+    conn = get_conn()
+    rows = conn.execute("SELECT language, COUNT(*) c FROM users GROUP BY language").fetchall()
+    conn.close()
+    labels = {"km": "Khmer", "en": "English"}
+    return {
+        "labels": [labels.get(r["language"], r["language"]) for r in rows],
+        "counts": [r["c"] for r in rows],
+    }
+
+
 @flask_app.route("/ping")
 def ping():
     return Response("OK - Daily Habit Bot is running", mimetype="text/plain")
@@ -1050,6 +1128,8 @@ def dashboard():
         stats=_dashboard_stats(),
         top_streaks=_top_streaks(),
         users=_user_rows(),
+        checkin_series_json=json.dumps(_daily_checkin_series()),
+        lang_breakdown_json=json.dumps(_language_breakdown()),
     )
 
 
