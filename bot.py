@@ -25,14 +25,15 @@ import os
 import io
 import json
 import random
+import secrets
 import sqlite3
 import logging
 import asyncio
 import threading
 from functools import wraps
 from datetime import datetime, time, timedelta, timezone
-from http.server import BaseHTTPRequestHandler, HTTPServer
 
+from flask import Flask, request, redirect, url_for, session, render_template_string, Response
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.ext import (
     Application,
@@ -46,6 +47,8 @@ from telegram.ext import (
 # ------------------------------------------------------------------
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "PUT_YOUR_TOKEN_HERE")
 ADMIN_CHAT_ID = int(os.environ.get("ADMIN_CHAT_ID", "0"))  # your own Telegram chat_id (for /maintenance)
+DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "changeme")  # web dashboard login
+FLASK_SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(32))
 TIMEZONE_OFFSET_HOURS = 7  # Asia/Phnom_Penh (UTC+7), no DST
 TZ = timezone(timedelta(hours=TIMEZONE_OFFSET_HOURS))
 DB_PATH = os.path.join(os.path.dirname(__file__), "habit_bot.db")
@@ -779,22 +782,205 @@ async def weekly_backup_job(context: ContextTypes.DEFAULT_TYPE):
 
 
 # ------------------------------------------------------------------
-# TINY HTTP SERVER (for UptimeRobot keep-alive on Render free tier)
+# WEB DASHBOARD (control panel + UptimeRobot keep-alive on Render free tier)
 # ------------------------------------------------------------------
-class PingHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"OK - Daily Habit Bot is running")
+flask_app = Flask(__name__)
+flask_app.secret_key = FLASK_SECRET_KEY
 
-    def log_message(self, format, *args):
-        pass
+DASHBOARD_CSS = """
+:root{--bg:#0f1115;--card:#171a21;--border:#262a33;--text:#e7e9ee;--muted:#8b90a0;
+      --accent:#5b8cff;--good:#39d98a;--bad:#ff5c72;--warn:#ffb454;}
+*{box-sizing:border-box;}
+body{margin:0;background:var(--bg);color:var(--text);
+     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+.wrap{max-width:960px;margin:0 auto;padding:32px 20px 60px;}
+h1{font-size:22px;margin:0 0 4px;}
+.sub{color:var(--muted);font-size:13px;margin:0 0 28px;}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:18px;}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:18px;}
+.stat{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;}
+.stat .n{font-size:26px;font-weight:700;}
+.stat .l{color:var(--muted);font-size:12px;margin-top:4px;}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;font-size:13px;font-weight:600;}
+.badge.on{background:rgba(255,92,114,.15);color:var(--bad);}
+.badge.off{background:rgba(57,217,138,.15);color:var(--good);}
+.row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;}
+button{background:var(--accent);color:#fff;border:none;border-radius:10px;padding:10px 18px;
+       font-size:14px;font-weight:600;cursor:pointer;}
+button.danger{background:var(--bad);}
+button.ghost{background:transparent;border:1px solid var(--border);color:var(--text);}
+table{width:100%;border-collapse:collapse;font-size:13px;}
+th{text-align:left;color:var(--muted);font-weight:600;padding:8px 10px;border-bottom:1px solid var(--border);}
+td{padding:8px 10px;border-bottom:1px solid var(--border);}
+tr:last-child td{border-bottom:none;}
+.empty{color:var(--muted);font-size:13px;padding:8px 0;}
+h2{font-size:15px;margin:0 0 14px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
+input[type=password]{width:100%;padding:12px;border-radius:10px;border:1px solid var(--border);
+       background:#0d0f14;color:var(--text);font-size:14px;margin-bottom:14px;}
+.login-box{max-width:340px;margin:80px auto;}
+.err{color:var(--bad);font-size:13px;margin-bottom:10px;}
+a{color:var(--accent);text-decoration:none;font-size:13px;}
+"""
+
+LOGIN_HTML = """
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Habit Bot — Login</title><style>{{ css }}</style></head>
+<body><div class="wrap login-box"><div class="card">
+<h1>🔒 Habit Bot Dashboard</h1><p class="sub">Enter the admin password to continue.</p>
+{% if error %}<p class="err">{{ error }}</p>{% endif %}
+<form method="post"><input type="password" name="password" placeholder="Password" autofocus>
+<button type="submit" style="width:100%">Log in</button></form>
+</div></div></body></html>
+"""
+
+DASHBOARD_HTML = """
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Habit Bot — Dashboard</title><style>{{ css }}</style></head>
+<body><div class="wrap">
+<div class="row"><div>
+<h1>📊 Daily Habit Bot</h1><p class="sub">Control panel &amp; live stats</p>
+</div><a href="{{ url_for('logout') }}">Log out</a></div>
+
+<div class="card row">
+  <div>
+    <span class="badge {{ 'on' if maintenance else 'off' }}">
+      {{ '🛠 Maintenance ON' if maintenance else '✅ Running normally' }}
+    </span>
+  </div>
+  <form method="post" action="{{ url_for('toggle_maintenance') }}">
+    <button class="{{ 'ghost' if maintenance else 'danger' }}" type="submit">
+      {{ 'Turn maintenance OFF' if maintenance else 'Turn maintenance ON' }}
+    </button>
+  </form>
+</div>
+
+<div class="grid">
+  <div class="stat"><div class="n">{{ stats.users }}</div><div class="l">Total users</div></div>
+  <div class="stat"><div class="n">{{ stats.tasks }}</div><div class="l">Total tasks</div></div>
+  <div class="stat"><div class="n">{{ stats.checkins_today }}</div><div class="l">Check-ins today</div></div>
+  <div class="stat"><div class="n">{{ stats.checkins_week }}</div><div class="l">Check-ins (7d)</div></div>
+</div>
+
+<div class="card">
+  <h2>Top streaks</h2>
+  {% if top_streaks %}
+  <table><tr><th>Task</th><th>User (chat_id)</th><th>Streak</th><th>Best</th></tr>
+  {% for r in top_streaks %}
+  <tr><td>{{ r.name }}</td><td>{{ r.chat_id }}</td><td>🔥 {{ r.streak }}</td><td>{{ r.best_streak }}</td></tr>
+  {% endfor %}</table>
+  {% else %}<p class="empty">No tasks yet.</p>{% endif %}
+</div>
+
+<div class="card">
+  <h2>Users</h2>
+  {% if users %}
+  <table><tr><th>chat_id</th><th>Language</th><th>Tasks</th><th>Reminder times</th></tr>
+  {% for u in users %}
+  <tr><td>{{ u.chat_id }}</td><td>{{ u.language }}</td><td>{{ u.task_count }}</td><td>{{ u.times }}</td></tr>
+  {% endfor %}</table>
+  {% else %}<p class="empty">No users yet.</p>{% endif %}
+</div>
+
+</div></body></html>
+"""
 
 
-def run_http_server():
+def _require_login(view):
+    @wraps(view)
+    def wrapper(*args, **kwargs):
+        if not session.get("logged_in"):
+            return redirect(url_for("login"))
+        return view(*args, **kwargs)
+    return wrapper
+
+
+def _dashboard_stats():
+    conn = get_conn()
+    users = conn.execute("SELECT COUNT(*) c FROM users").fetchone()["c"]
+    tasks = conn.execute("SELECT COUNT(*) c FROM tasks").fetchone()["c"]
+    checkins_today = conn.execute(
+        "SELECT COUNT(*) c FROM logs WHERE date=? AND done=1", (today_str(),)
+    ).fetchone()["c"]
+    week_cutoff = (datetime.now(TZ) - timedelta(days=7)).strftime("%Y-%m-%d")
+    checkins_week = conn.execute(
+        "SELECT COUNT(*) c FROM logs WHERE date>=? AND done=1", (week_cutoff,)
+    ).fetchone()["c"]
+    conn.close()
+    return {"users": users, "tasks": tasks, "checkins_today": checkins_today, "checkins_week": checkins_week}
+
+
+def _top_streaks(limit=10):
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT chat_id, name, streak, best_streak FROM tasks ORDER BY streak DESC, best_streak DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def _user_rows():
+    conn = get_conn()
+    users = conn.execute("SELECT chat_id, language FROM users ORDER BY chat_id").fetchall()
+    out = []
+    for u in users:
+        task_count = conn.execute("SELECT COUNT(*) c FROM tasks WHERE chat_id=?", (u["chat_id"],)).fetchone()["c"]
+        times = conn.execute(
+            "SELECT hour, minute FROM reminder_times WHERE chat_id=? ORDER BY hour, minute", (u["chat_id"],)
+        ).fetchall()
+        times_str = ", ".join(f"{r['hour']:02d}:{r['minute']:02d}" for r in times) or "—"
+        out.append({"chat_id": u["chat_id"], "language": u["language"], "task_count": task_count, "times": times_str})
+    conn.close()
+    return out
+
+
+@flask_app.route("/ping")
+def ping():
+    return Response("OK - Daily Habit Bot is running", mimetype="text/plain")
+
+
+@flask_app.route("/login", methods=["GET", "POST"])
+def login():
+    error = None
+    if request.method == "POST":
+        if secrets.compare_digest(request.form.get("password", ""), DASHBOARD_PASSWORD):
+            session["logged_in"] = True
+            return redirect(url_for("dashboard"))
+        error = "Wrong password."
+    return render_template_string(LOGIN_HTML, css=DASHBOARD_CSS, error=error)
+
+
+@flask_app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
+@flask_app.route("/")
+@_require_login
+def dashboard():
+    return render_template_string(
+        DASHBOARD_HTML,
+        css=DASHBOARD_CSS,
+        maintenance=is_maintenance_on(),
+        stats=_dashboard_stats(),
+        top_streaks=_top_streaks(),
+        users=_user_rows(),
+    )
+
+
+@flask_app.route("/toggle-maintenance", methods=["POST"])
+@_require_login
+def toggle_maintenance():
+    set_setting("maintenance_mode", "false" if is_maintenance_on() else "true")
+    return redirect(url_for("dashboard"))
+
+
+def run_dashboard():
     port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(("0.0.0.0", port), PingHandler)
-    server.serve_forever()
+    flask_app.run(host="0.0.0.0", port=port, threaded=True, use_reloader=False)
 
 
 # ------------------------------------------------------------------
@@ -818,7 +1004,10 @@ def main():
 
     init_db()
 
-    threading.Thread(target=run_http_server, daemon=True).start()
+    if DASHBOARD_PASSWORD == "changeme":
+        logger.warning("DASHBOARD_PASSWORD is not set — using the default 'changeme'. Set it in your environment!")
+
+    threading.Thread(target=run_dashboard, daemon=True).start()
 
     application = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
 
