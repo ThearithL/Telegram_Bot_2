@@ -393,7 +393,7 @@ async def post_init(application: Application):
 
 
 def main():
-    if BOT_TOKEN == "8944062148:AAGQ3BEqr5ECH3_ThD0Nr0TNXvxZt1Wu-B8":
+    if BOT_TOKEN == "PUT_YOUR_TOKEN_HERE":
         raise RuntimeError("Set the BOT_TOKEN environment variable before running.")
 
     init_db()
