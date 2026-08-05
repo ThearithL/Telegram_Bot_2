@@ -22,6 +22,7 @@ Timezone:
 import os
 import sqlite3
 import logging
+import asyncio
 import threading
 from datetime import datetime, time, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -394,6 +395,9 @@ async def post_init(application: Application):
 
 def main():
     if BOT_TOKEN == "PUT_YOUR_TOKEN_HERE":
+        # Debug: show which env var keys Render actually sees (no values, no secrets)
+        env_keys = sorted(os.environ.keys())
+        logger.error("BOT_TOKEN not found. Available env var keys: %s", env_keys)
         raise RuntimeError("Set the BOT_TOKEN environment variable before running.")
 
     init_db()
@@ -412,6 +416,16 @@ def main():
     application.add_handler(CallbackQueryHandler(button_handler))
 
     logger.info("Bot starting...")
+
+    # Python 3.13+/3.14 removed the implicit "create a loop if none exists"
+    # behavior of asyncio.get_event_loop(), which older python-telegram-bot/
+    # APScheduler internals still rely on. Create and set one explicitly so
+    # run_polling() has an event loop to attach to regardless of Python version.
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
