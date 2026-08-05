@@ -34,7 +34,7 @@ from functools import wraps
 from datetime import datetime, time, timedelta, timezone
 
 from flask import Flask, request, redirect, url_for, session, render_template_string, Response
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Bot
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -649,6 +649,19 @@ async def maintenance_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(t(lang, "maintenance_usage"))
 
 
+async def backupnow_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    lang = get_user_language(chat_id)
+    if not is_admin(chat_id):
+        await update.message.reply_text(t(lang, "maintenance_no_permission"))
+        return
+    await backup_db_to_telegram(context)
+    await update.message.reply_text(
+        "✅ បម្រុងទុកទិន្នន័យ ហើយ pin ក្នុង chat នេះរួចហើយ។" if lang == "km"
+        else "✅ Backup sent and pinned in this chat."
+    )
+
+
 async def _snoozed_checkin_job(context: ContextTypes.DEFAULT_TYPE):
     chat_id = context.job.chat_id
     await send_checkin(chat_id, context)
@@ -729,6 +742,75 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(t(lang, "checkin_done", date=date) + "\n".join(summary_lines))
         for badge_msg in badge_lines:
             await context.bot.send_message(chat_id=chat_id, text=badge_msg)
+
+        await backup_db_to_telegram(context)
+
+
+# ------------------------------------------------------------------
+# PERSISTENCE VIA TELEGRAM (survives Render free-tier redeploys)
+# ------------------------------------------------------------------
+# Render's free tier wipes the local filesystem on every redeploy/restart,
+# so habit_bot.db can't live there permanently. Instead: after every change
+# we snapshot the DB and send+pin it as a document in the admin's chat.
+# Telegram — not Render — is what actually keeps it, since a chat's pinned
+# message survives independently of our server. On startup, before
+# creating a fresh DB, we check that pinned message and restore from it.
+def _snapshot_db_bytes():
+    tmp_path = DB_PATH + ".snapshot"
+    conn = get_conn()
+    conn.execute("VACUUM INTO ?", (tmp_path,))
+    conn.close()
+    with open(tmp_path, "rb") as f:
+        data = f.read()
+    os.remove(tmp_path)
+    return data
+
+
+async def backup_db_to_telegram(context: ContextTypes.DEFAULT_TYPE):
+    if ADMIN_CHAT_ID == 0:
+        return
+    try:
+        data = _snapshot_db_bytes()
+        file_obj = io.BytesIO(data)
+        file_obj.name = "habit_bot.db"
+        msg = await context.bot.send_document(
+            chat_id=ADMIN_CHAT_ID,
+            document=InputFile(file_obj),
+            caption=f"🗄 Auto-backup — {datetime.now(TZ).strftime('%Y-%m-%d %H:%M')}",
+            disable_notification=True,
+        )
+        try:
+            await context.bot.unpin_all_chat_messages(chat_id=ADMIN_CHAT_ID)
+        except Exception:
+            pass  # nothing pinned yet, or not enough rights — still try to pin the new one
+        await context.bot.pin_chat_message(chat_id=ADMIN_CHAT_ID, message_id=msg.message_id, disable_notification=True)
+    except Exception as exc:
+        logger.warning("DB backup to Telegram failed: %s", exc)
+
+
+async def restore_db_from_telegram():
+    if os.path.exists(DB_PATH):
+        logger.info("Local database already present — skipping restore.")
+        return
+    if ADMIN_CHAT_ID == 0:
+        logger.warning("ADMIN_CHAT_ID is not set — cannot restore from Telegram, starting with a fresh database.")
+        return
+
+    bot = Bot(token=BOT_TOKEN)
+    await bot.initialize()
+    try:
+        chat = await bot.get_chat(ADMIN_CHAT_ID)
+        pinned = chat.pinned_message
+        if pinned and pinned.document:
+            file = await bot.get_file(pinned.document.file_id)
+            await file.download_to_drive(DB_PATH)
+            logger.info("Restored habit_bot.db from the pinned Telegram backup.")
+        else:
+            logger.info("No pinned backup found in the admin chat — starting with a fresh database.")
+    except Exception as exc:
+        logger.warning("Could not restore database from Telegram: %s", exc)
+    finally:
+        await bot.shutdown()
 
 
 # ------------------------------------------------------------------
@@ -994,6 +1076,12 @@ async def post_init(application: Application):
         days=(BACKUP_WEEKDAY,),
         name="weekly_backup",
     )
+    application.job_queue.run_repeating(
+        callback=backup_db_to_telegram,
+        interval=timedelta(minutes=30),
+        first=60,
+        name="db_backup",
+    )
 
 
 def main():
@@ -1002,6 +1090,7 @@ def main():
         logger.error("BOT_TOKEN not found. Available env var keys: %s", env_keys)
         raise RuntimeError("Set the BOT_TOKEN environment variable before running.")
 
+    asyncio.run(restore_db_from_telegram())
     init_db()
 
     if DASHBOARD_PASSWORD == "changeme":
@@ -1023,6 +1112,7 @@ def main():
     application.add_handler(CommandHandler("export", export_command))
     application.add_handler(CommandHandler("language", language_command))
     application.add_handler(CommandHandler("maintenance", maintenance_command))
+    application.add_handler(CommandHandler("backupnow", backupnow_command))
     application.add_handler(CallbackQueryHandler(button_handler))
 
     logger.info("Bot starting...")
