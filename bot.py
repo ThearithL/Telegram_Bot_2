@@ -29,6 +29,7 @@ import sqlite3
 import logging
 import asyncio
 import threading
+from functools import wraps
 from datetime import datetime, time, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -44,6 +45,7 @@ from telegram.ext import (
 # CONFIG
 # ------------------------------------------------------------------
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "PUT_YOUR_TOKEN_HERE")
+ADMIN_CHAT_ID = int(os.environ.get("ADMIN_CHAT_ID", "0"))  # your own Telegram chat_id (for /maintenance)
 TIMEZONE_OFFSET_HOURS = 7  # Asia/Phnom_Penh (UTC+7), no DST
 TZ = timezone(timedelta(hours=TIMEZONE_OFFSET_HOURS))
 DB_PATH = os.path.join(os.path.dirname(__file__), "habit_bot.db")
@@ -165,6 +167,15 @@ TEXT = {
     "language_prompt": {"km": "🌐 សូមជ្រើសរើសភាសា:", "en": "🌐 Choose your language:"},
     "language_set": {"km": "✅ ភាសាត្រូវបានប្តូរទៅជា ខ្មែរ", "en": "✅ Language switched to English"},
     "export_caption": {"km": "📦 ទិន្នន័យរបស់អ្នក (task, streak, log)", "en": "📦 Your data export (tasks, streaks, logs)"},
+    "maintenance_active": {
+        "km": "🛠 Bot កំពុងស្ថិតក្នុងការថែទាំបណ្តោះអាសន្ន សូមរង់ចាំបន្តិច ហើយសាកល្បងម្តងទៀតពេលក្រោយ។",
+        "en": "🛠 The bot is under maintenance right now. Please try again shortly.",
+    },
+    "maintenance_usage": {"km": "របៀបប្រើ: /maintenance on | off | status", "en": "Usage: /maintenance on | off | status"},
+    "maintenance_no_permission": {"km": "⛔ Command នេះសម្រាប់តែ admin ប៉ុណ្ណោះ។", "en": "⛔ This command is admin-only."},
+    "maintenance_now_on": {"km": "🛠 Maintenance mode: ON — reminders និង commands ត្រូវផ្អាកសម្រាប់ user ធម្មតា។", "en": "🛠 Maintenance mode: ON — reminders and commands are paused for regular users."},
+    "maintenance_now_off": {"km": "✅ Maintenance mode: OFF — bot ដំណើរការធម្មតាវិញ។", "en": "✅ Maintenance mode: OFF — bot is back to normal."},
+    "maintenance_status": {"km": "Maintenance mode ឥឡូវនេះ: {state}", "en": "Maintenance mode is currently: {state}"},
 }
 
 BADGE_NAMES = {
@@ -234,6 +245,12 @@ def init_db():
             minute INTEGER
         )
     """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
     conn.commit()
 
     # Migrate old single reminder_hour/reminder_minute into reminder_times, once.
@@ -270,6 +287,49 @@ def ensure_user(chat_id, language=None):
     conn.close()
 
 
+def get_setting(key, default=None):
+    conn = get_conn()
+    row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    conn.close()
+    return row["value"] if row else default
+
+
+def set_setting(key, value):
+    conn = get_conn()
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (key, value),
+    )
+    conn.commit()
+    conn.close()
+
+
+def is_maintenance_on():
+    return get_setting("maintenance_mode", "false") == "true"
+
+
+def is_admin(chat_id):
+    return ADMIN_CHAT_ID != 0 and chat_id == ADMIN_CHAT_ID
+
+
+def maintenance_guard(func):
+    """Blocks a handler for non-admin users while maintenance mode is on."""
+    @wraps(func)
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
+        chat_id = update.effective_chat.id
+        if is_maintenance_on() and not is_admin(chat_id):
+            lang = get_user_language(chat_id)
+            if update.callback_query:
+                await update.callback_query.answer()
+                await update.callback_query.message.reply_text(t(lang, "maintenance_active"))
+            else:
+                await update.message.reply_text(t(lang, "maintenance_active"))
+            return
+        return await func(update, context, *args, **kwargs)
+    return wrapper
+
+
 def today_str():
     return datetime.now(TZ).strftime("%Y-%m-%d")
 
@@ -281,6 +341,7 @@ def yesterday_str():
 # ------------------------------------------------------------------
 # COMMANDS
 # ------------------------------------------------------------------
+@maintenance_guard
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     ensure_user(chat_id)
@@ -303,6 +364,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+@maintenance_guard
 async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     lang = get_user_language(chat_id)
@@ -315,6 +377,7 @@ async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(t(lang, "language_prompt"), reply_markup=keyboard)
 
 
+@maintenance_guard
 async def add_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     lang = get_user_language(chat_id)
@@ -336,6 +399,7 @@ async def add_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(t(lang, "addtask_success", name=name))
 
 
+@maintenance_guard
 async def remove_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     lang = get_user_language(chat_id)
@@ -358,6 +422,7 @@ async def remove_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(t(lang, "removetask_success", name=name))
 
 
+@maintenance_guard
 async def my_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     lang = get_user_language(chat_id)
@@ -382,6 +447,7 @@ def _parse_hhmm(text):
     return hour, minute
 
 
+@maintenance_guard
 async def add_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     lang = get_user_language(chat_id)
@@ -412,6 +478,7 @@ async def add_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(t(lang, "addtime_success", hour=hour, minute=minute))
 
 
+@maintenance_guard
 async def remove_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     lang = get_user_language(chat_id)
@@ -441,6 +508,7 @@ async def remove_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(t(lang, "removetime_success", hour=hour, minute=minute))
 
 
+@maintenance_guard
 async def my_times(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     lang = get_user_language(chat_id)
@@ -460,6 +528,7 @@ async def my_times(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines))
 
 
+@maintenance_guard
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     lang = get_user_language(chat_id)
@@ -499,6 +568,7 @@ def build_user_export(chat_id):
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
+@maintenance_guard
 async def export_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     lang = get_user_language(chat_id)
@@ -528,6 +598,8 @@ def build_checkin_keyboard(chat_id, lang):
 
 
 async def send_checkin(chat_id, context: ContextTypes.DEFAULT_TYPE):
+    if is_maintenance_on() and not is_admin(chat_id):
+        return  # don't ping users with reminders while the bot is under maintenance
     conn = get_conn()
     tasks = conn.execute("SELECT id FROM tasks WHERE chat_id=?", (chat_id,)).fetchall()
     conn.close()
@@ -543,8 +615,35 @@ async def send_checkin(chat_id, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+@maintenance_guard
 async def manual_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_checkin(update.effective_chat.id, context)
+
+
+async def maintenance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    lang = get_user_language(chat_id)
+    if not is_admin(chat_id):
+        await update.message.reply_text(t(lang, "maintenance_no_permission"))
+        return
+
+    if not context.args:
+        state = "ON" if is_maintenance_on() else "OFF"
+        await update.message.reply_text(t(lang, "maintenance_status", state=state))
+        return
+
+    arg = context.args[0].lower()
+    if arg == "on":
+        set_setting("maintenance_mode", "true")
+        await update.message.reply_text(t(lang, "maintenance_now_on"))
+    elif arg == "off":
+        set_setting("maintenance_mode", "false")
+        await update.message.reply_text(t(lang, "maintenance_now_off"))
+    elif arg == "status":
+        state = "ON" if is_maintenance_on() else "OFF"
+        await update.message.reply_text(t(lang, "maintenance_status", state=state))
+    else:
+        await update.message.reply_text(t(lang, "maintenance_usage"))
 
 
 async def _snoozed_checkin_job(context: ContextTypes.DEFAULT_TYPE):
@@ -552,6 +651,7 @@ async def _snoozed_checkin_job(context: ContextTypes.DEFAULT_TYPE):
     await send_checkin(chat_id, context)
 
 
+@maintenance_guard
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     chat_id = query.message.chat_id
@@ -662,6 +762,8 @@ async def schedule_all_users(application: Application):
 
 
 async def weekly_backup_job(context: ContextTypes.DEFAULT_TYPE):
+    if is_maintenance_on():
+        return
     conn = get_conn()
     chat_ids = [row["chat_id"] for row in conn.execute("SELECT chat_id FROM users").fetchall()]
     conn.close()
@@ -731,6 +833,7 @@ def main():
     application.add_handler(CommandHandler("stats", stats))
     application.add_handler(CommandHandler("export", export_command))
     application.add_handler(CommandHandler("language", language_command))
+    application.add_handler(CommandHandler("maintenance", maintenance_command))
     application.add_handler(CallbackQueryHandler(button_handler))
 
     logger.info("Bot starting...")
