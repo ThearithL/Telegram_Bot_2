@@ -17,6 +17,7 @@ report, and speaks both Khmer and English.
 | `/checkin` | Trigger a check-in immediately (for testing) |
 | `/stats` | See your 7-day completion report |
 | `/export` | Download your own data as a JSON file |
+| `/exportexcel` | Download your own data as an Excel (.xlsx) file |
 | `/language` | Switch between Khmer and English |
 | `/maintenance on\|off\|status` | Admin-only: pause/resume the bot for regular users |
 
@@ -35,6 +36,11 @@ report, and speaks both Khmer and English.
    of their own tasks and logs (also available anytime via `/export`) —
    this protects your data since Render's free tier storage isn't
    persistent across redeploys.
+7. Want your data in a spreadsheet instead? Run `/exportexcel` any time
+   to get a `.xlsx` file with two sheets: **Tasks** (name, current streak,
+   best streak, total check-ins, completed count) and **Logs** (every
+   task/date/done entry), ready to open in Excel, Google Sheets, or
+   LibreOffice.
 
 ## Local setup
 ```bash

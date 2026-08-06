@@ -34,6 +34,9 @@ from functools import wraps
 from datetime import datetime, time, timedelta, timezone
 
 from flask import Flask, request, redirect, url_for, session, render_template_string, Response
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.utils import get_column_letter
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Bot
 from telegram.ext import (
     Application,
@@ -113,6 +116,7 @@ TEXT = {
             "/checkin - សាកល្បង check-in ភ្លាមៗ\n"
             "/stats - របាយការណ៍ 7 ថ្ងៃចុងក្រោយ\n"
             "/export - ទាញយកទិន្នន័យខ្លួនឯង (JSON)\n"
+            "/exportexcel - ទាញយកទិន្នន័យខ្លួនឯង (Excel)\n"
             "/language - ប្តូរភាសា\n\n"
             "ម៉ោងជូនដំណឹង default គឺ {hour:02d}:{minute:02d} (ម៉ោងកម្ពុជា)។ ប្រើ /addtime ដើម្បីបន្ថែម។"
         ),
@@ -128,6 +132,7 @@ TEXT = {
             "/checkin - trigger a check-in now\n"
             "/stats - see your 7-day report\n"
             "/export - download your own data (JSON)\n"
+            "/exportexcel - download your own data (Excel)\n"
             "/language - switch language\n\n"
             "Default reminder time is {hour:02d}:{minute:02d} (Phnom Penh time). Use /addtime to add more."
         ),
@@ -170,6 +175,7 @@ TEXT = {
     "language_prompt": {"km": "🌐 សូមជ្រើសរើសភាសា:", "en": "🌐 Choose your language:"},
     "language_set": {"km": "✅ ភាសាត្រូវបានប្តូរទៅជា ខ្មែរ", "en": "✅ Language switched to English"},
     "export_caption": {"km": "📦 ទិន្នន័យរបស់អ្នក (task, streak, log)", "en": "📦 Your data export (tasks, streaks, logs)"},
+    "export_excel_caption": {"km": "📊 ទិន្នន័យរបស់អ្នក (Excel)", "en": "📊 Your data export (Excel)"},
     "maintenance_active": {
         "km": "🛠 Bot កំពុងស្ថិតក្នុងការថែទាំបណ្តោះអាសន្ន សូមរង់ចាំបន្តិច ហើយសាកល្បងម្តងទៀតពេលក្រោយ។",
         "en": "🛠 The bot is under maintenance right now. Please try again shortly.",
@@ -581,6 +587,69 @@ async def export_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_document(document=InputFile(file_obj), caption=t(lang, "export_caption"))
 
 
+def build_user_export_xlsx(chat_id):
+    """Build an in-memory .xlsx workbook with the user's tasks + full log history."""
+    conn = get_conn()
+    tasks = conn.execute("SELECT * FROM tasks WHERE chat_id=?", (chat_id,)).fetchall()
+
+    wb = Workbook()
+
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    header_align = Alignment(horizontal="center", vertical="center")
+
+    def style_header(ws, row_idx=1):
+        for cell in ws[row_idx]:
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
+
+    def autosize(ws):
+        for col_cells in ws.columns:
+            length = max((len(str(c.value)) if c.value is not None else 0) for c in col_cells)
+            ws.column_dimensions[get_column_letter(col_cells[0].column)].width = min(max(length + 2, 10), 40)
+
+    # --- Sheet 1: Tasks summary ---
+    ws_tasks = wb.active
+    ws_tasks.title = "Tasks"
+    ws_tasks.append(["Task Name", "Current Streak", "Best Streak", "Total Check-ins", "Completed"])
+    for task_row in tasks:
+        logs = conn.execute("SELECT done FROM logs WHERE task_id=?", (task_row["id"],)).fetchall()
+        total = len(logs)
+        completed = sum(1 for l in logs if l["done"])
+        ws_tasks.append([task_row["name"], task_row["streak"], task_row["best_streak"], total, completed])
+    style_header(ws_tasks)
+    ws_tasks.freeze_panes = "A2"
+    autosize(ws_tasks)
+
+    # --- Sheet 2: Full daily log history ---
+    ws_logs = wb.create_sheet("Logs")
+    ws_logs.append(["Task Name", "Date", "Done"])
+    for task_row in tasks:
+        logs = conn.execute("SELECT date, done FROM logs WHERE task_id=? ORDER BY date", (task_row["id"],)).fetchall()
+        for l in logs:
+            ws_logs.append([task_row["name"], l["date"], "Yes" if l["done"] else "No"])
+    style_header(ws_logs)
+    ws_logs.freeze_panes = "A2"
+    autosize(ws_logs)
+
+    conn.close()
+
+    file_obj = io.BytesIO()
+    wb.save(file_obj)
+    file_obj.seek(0)
+    return file_obj
+
+
+@maintenance_guard
+async def export_excel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    lang = get_user_language(chat_id)
+    file_obj = build_user_export_xlsx(chat_id)
+    file_obj.name = f"habit_data_{chat_id}_{today_str()}.xlsx"
+    await update.message.reply_document(document=InputFile(file_obj), caption=t(lang, "export_excel_caption"))
+
+
 # ------------------------------------------------------------------
 # CHECK-IN FLOW (inline buttons)
 # ------------------------------------------------------------------
@@ -776,8 +845,8 @@ async def backup_db_to_telegram(context: ContextTypes.DEFAULT_TYPE):
         msg = await context.bot.send_document(
             chat_id=ADMIN_CHAT_ID,
             document=InputFile(file_obj),
-            caption=f"🗄 Auto-backup — {datetime.now(TZ).strftime('%Y-%m-%d %H:%M')}",
-            disable_notification=True,
+            # caption=f"🗄 Auto-backup — {datetime.now(TZ).strftime('%Y-%m-%d %H:%M')}",
+            # disable_notification=True,
         )
         try:
             await context.bot.unpin_all_chat_messages(chat_id=ADMIN_CHAT_ID)
@@ -1190,6 +1259,7 @@ def main():
     application.add_handler(CommandHandler("checkin", manual_checkin))
     application.add_handler(CommandHandler("stats", stats))
     application.add_handler(CommandHandler("export", export_command))
+    application.add_handler(CommandHandler("exportexcel", export_excel_command))
     application.add_handler(CommandHandler("language", language_command))
     application.add_handler(CommandHandler("maintenance", maintenance_command))
     application.add_handler(CommandHandler("backupnow", backupnow_command))
