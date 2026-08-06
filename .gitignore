@@ -1,2 +1,6 @@
 "README.md" 
 "README.md" 
+__pycache__/
+*.pyc
+habit_bot.db
+.env

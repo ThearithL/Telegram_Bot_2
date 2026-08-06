@@ -7,7 +7,8 @@ Features:
   - Snooze button (delay a check-in by 1 hour)
   - Motivational quotes with each check-in
   - Streak milestone badges (7 / 30 / 100 days)
-  - Weekly personal data backup sent to you as a JSON file (+/export on demand)
+  - Excel export of your own data any time (/export)
+  - Permanent storage on Render's free tier via Turso (optional, free)
   - Bilingual: Khmer (ខ្មែរ) and English, switch anytime with /language
 
 Run:
@@ -16,6 +17,9 @@ Run:
 
 Environment variable required:
     BOT_TOKEN   - your Telegram bot token from @BotFather
+
+Optional (for permanent storage across Render redeploys — see README):
+    TURSO_DATABASE_URL, TURSO_AUTH_TOKEN
 
 Timezone:
     Defaults to Asia/Phnom_Penh (UTC+7). Change TIMEZONE_OFFSET_HOURS below if needed.
@@ -37,13 +41,18 @@ from flask import Flask, request, redirect, url_for, session, render_template_st
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Bot
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.ext import (
     Application,
     CommandHandler,
     CallbackQueryHandler,
     ContextTypes,
 )
+
+try:
+    import libsql_experimental as libsql
+except ImportError:
+    libsql = None
 
 # ------------------------------------------------------------------
 # CONFIG
@@ -59,15 +68,27 @@ DEFAULT_REMINDER_HOUR = 20
 DEFAULT_REMINDER_MINUTE = 0
 DEFAULT_LANGUAGE = "km"  # "km" = Khmer, "en" = English
 BADGE_MILESTONES = (7, 30, 100)
-BACKUP_WEEKDAY = 6  # 0=Monday ... 6=Sunday
-BACKUP_HOUR = 23
-BACKUP_MINUTE = 55
+
+# --- Permanent storage (free, via Turso) ---------------------------------
+# Render's free tier wipes the local disk on every redeploy/restart. If
+# TURSO_DATABASE_URL + TURSO_AUTH_TOKEN are set, habit_bot.db becomes an
+# "embedded replica": a normal local SQLite file that reads/writes at local
+# speed but is transparently synced to a free Turso cloud database, so a
+# redeploy never loses data. Without them, it just falls back to plain
+# local SQLite (same as before) and data resets on every redeploy.
+TURSO_DATABASE_URL = os.environ.get("TURSO_DATABASE_URL", "").strip()
+TURSO_AUTH_TOKEN = os.environ.get("TURSO_AUTH_TOKEN", "").strip()
+USE_TURSO = bool(TURSO_DATABASE_URL and TURSO_AUTH_TOKEN and libsql is not None)
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
+
+if TURSO_DATABASE_URL and TURSO_AUTH_TOKEN and libsql is None:
+    logger.warning("TURSO_DATABASE_URL/TURSO_AUTH_TOKEN are set but the 'libsql-experimental' "
+                    "package isn't installed — falling back to local-only SQLite.")
 
 # In-memory: pending (not-yet-confirmed) check-in state per chat_id
 # { chat_id: { task_id: bool } }
@@ -115,8 +136,7 @@ TEXT = {
             "/mytimes - មើលម៉ោងជូនដំណឹងទាំងអស់\n"
             "/checkin - សាកល្បង check-in ភ្លាមៗ\n"
             "/stats - របាយការណ៍ 7 ថ្ងៃចុងក្រោយ\n"
-            "/export - ទាញយកទិន្នន័យខ្លួនឯង (JSON)\n"
-            "/exportexcel - ទាញយកទិន្នន័យខ្លួនឯង (Excel)\n"
+            "/export - ទាញយកទិន្នន័យខ្លួនឯង (Excel)\n"
             "/language - ប្តូរភាសា\n\n"
             "ម៉ោងជូនដំណឹង default គឺ {hour:02d}:{minute:02d} (ម៉ោងកម្ពុជា)។ ប្រើ /addtime ដើម្បីបន្ថែម។"
         ),
@@ -131,8 +151,7 @@ TEXT = {
             "/mytimes - list all your reminder times\n"
             "/checkin - trigger a check-in now\n"
             "/stats - see your 7-day report\n"
-            "/export - download your own data (JSON)\n"
-            "/exportexcel - download your own data (Excel)\n"
+            "/export - download your own data (Excel)\n"
             "/language - switch language\n\n"
             "Default reminder time is {hour:02d}:{minute:02d} (Phnom Penh time). Use /addtime to add more."
         ),
@@ -174,8 +193,7 @@ TEXT = {
     },
     "language_prompt": {"km": "🌐 សូមជ្រើសរើសភាសា:", "en": "🌐 Choose your language:"},
     "language_set": {"km": "✅ ភាសាត្រូវបានប្តូរទៅជា ខ្មែរ", "en": "✅ Language switched to English"},
-    "export_caption": {"km": "📦 ទិន្នន័យរបស់អ្នក (task, streak, log)", "en": "📦 Your data export (tasks, streaks, logs)"},
-    "export_excel_caption": {"km": "📊 ទិន្នន័យរបស់អ្នក (Excel)", "en": "📊 Your data export (Excel)"},
+    "export_caption": {"km": "📊 ទិន្នន័យរបស់អ្នក (Excel)", "en": "📊 Your data export (Excel)"},
     "maintenance_active": {
         "km": "🛠 Bot កំពុងស្ថិតក្នុងការថែទាំបណ្តោះអាសន្ន សូមរង់ចាំបន្តិច ហើយសាកល្បងម្តងទៀតពេលក្រោយ។",
         "en": "🛠 The bot is under maintenance right now. Please try again shortly.",
@@ -203,13 +221,88 @@ def t(lang, key, **kwargs):
 # ------------------------------------------------------------------
 # DATABASE
 # ------------------------------------------------------------------
+class Row(dict):
+    """Dict-style row (row["col"]) that also supports dict(row), used for
+    both backends so the rest of the code never needs to know which one
+    it's talking to."""
+    pass
+
+
+def _wrap_rows(cursor, raw_rows):
+    cols = [d[0] for d in cursor.description] if cursor.description else []
+    return [Row(zip(cols, r)) for r in raw_rows]
+
+
+class _LibsqlCursor:
+    """Makes a libsql_experimental cursor look like a sqlite3.Row cursor."""
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    def execute(self, sql, params=()):
+        self._cursor.execute(sql, params)
+        return self
+
+    def fetchone(self):
+        row = self._cursor.fetchone()
+        if row is None:
+            return None
+        return _wrap_rows(self._cursor, [row])[0]
+
+    def fetchall(self):
+        return _wrap_rows(self._cursor, self._cursor.fetchall())
+
+    @property
+    def description(self):
+        return self._cursor.description
+
+
+class _LibsqlConn:
+    """Wraps a libsql_experimental (Turso) connection so it behaves like a
+    sqlite3.Connection with row_factory=sqlite3.Row — libsql returns plain
+    tuples and has no row_factory support, so every `row["col"]` access
+    elsewhere in this file would otherwise break."""
+    def __init__(self, conn):
+        self._conn = conn
+
+    def execute(self, sql, params=()):
+        return _LibsqlCursor(self._conn.execute(sql, params))
+
+    def cursor(self):
+        return _LibsqlCursor(self._conn.cursor())
+
+    def commit(self):
+        self._conn.commit()
+
+    def close(self):
+        try:
+            self._conn.sync()  # push local writes up to Turso Cloud
+        except Exception as exc:
+            logger.warning("Turso sync failed (will retry next connection): %s", exc)
+        self._conn.close()
+
+
 def get_conn():
+    if USE_TURSO:
+        conn = libsql.connect(DB_PATH, sync_url=TURSO_DATABASE_URL, auth_token=TURSO_AUTH_TOKEN)
+        return _LibsqlConn(conn)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
 
 def init_db():
+    if USE_TURSO:
+        # Pull the latest data down from Turso Cloud before we start reading
+        # or creating tables locally, so a fresh Render container always
+        # starts from the newest synced copy instead of an empty file.
+        try:
+            conn = libsql.connect(DB_PATH, sync_url=TURSO_DATABASE_URL, auth_token=TURSO_AUTH_TOKEN)
+            conn.sync()
+            conn.close()
+            logger.info("Synced latest data down from Turso Cloud.")
+        except Exception as exc:
+            logger.warning("Initial Turso sync failed — continuing with local data: %s", exc)
+
     conn = get_conn()
     c = conn.cursor()
     c.execute("""
@@ -561,32 +654,6 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines))
 
 
-def build_user_export(chat_id):
-    conn = get_conn()
-    tasks = conn.execute("SELECT * FROM tasks WHERE chat_id=?", (chat_id,)).fetchall()
-    data = {"chat_id": chat_id, "exported_at": datetime.now(TZ).isoformat(), "tasks": []}
-    for task_row in tasks:
-        logs = conn.execute("SELECT date, done FROM logs WHERE task_id=? ORDER BY date", (task_row["id"],)).fetchall()
-        data["tasks"].append({
-            "name": task_row["name"],
-            "streak": task_row["streak"],
-            "best_streak": task_row["best_streak"],
-            "logs": [{"date": l["date"], "done": bool(l["done"])} for l in logs],
-        })
-    conn.close()
-    return json.dumps(data, ensure_ascii=False, indent=2)
-
-
-@maintenance_guard
-async def export_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    lang = get_user_language(chat_id)
-    payload = build_user_export(chat_id)
-    file_obj = io.BytesIO(payload.encode("utf-8"))
-    file_obj.name = f"habit_data_{chat_id}_{today_str()}.json"
-    await update.message.reply_document(document=InputFile(file_obj), caption=t(lang, "export_caption"))
-
-
 def build_user_export_xlsx(chat_id):
     """Build an in-memory .xlsx workbook with the user's tasks + full log history."""
     conn = get_conn()
@@ -642,12 +709,12 @@ def build_user_export_xlsx(chat_id):
 
 
 @maintenance_guard
-async def export_excel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def export_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     lang = get_user_language(chat_id)
     file_obj = build_user_export_xlsx(chat_id)
     file_obj.name = f"habit_data_{chat_id}_{today_str()}.xlsx"
-    await update.message.reply_document(document=InputFile(file_obj), caption=t(lang, "export_excel_caption"))
+    await update.message.reply_document(document=InputFile(file_obj), caption=t(lang, "export_caption"))
 
 
 # ------------------------------------------------------------------
@@ -716,19 +783,6 @@ async def maintenance_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(t(lang, "maintenance_status", state=state))
     else:
         await update.message.reply_text(t(lang, "maintenance_usage"))
-
-
-async def backupnow_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    lang = get_user_language(chat_id)
-    if not is_admin(chat_id):
-        await update.message.reply_text(t(lang, "maintenance_no_permission"))
-        return
-    await backup_db_to_telegram(context)
-    await update.message.reply_text(
-        "✅ បម្រុងទុកទិន្នន័យ ហើយ pin ក្នុង chat នេះរួចហើយ។" if lang == "km"
-        else "✅ Backup sent and pinned in this chat."
-    )
 
 
 async def _snoozed_checkin_job(context: ContextTypes.DEFAULT_TYPE):
@@ -812,75 +866,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for badge_msg in badge_lines:
             await context.bot.send_message(chat_id=chat_id, text=badge_msg)
 
-        await backup_db_to_telegram(context)
-
-
-# ------------------------------------------------------------------
-# PERSISTENCE VIA TELEGRAM (survives Render free-tier redeploys)
-# ------------------------------------------------------------------
-# Render's free tier wipes the local filesystem on every redeploy/restart,
-# so habit_bot.db can't live there permanently. Instead: after every change
-# we snapshot the DB and send+pin it as a document in the admin's chat.
-# Telegram — not Render — is what actually keeps it, since a chat's pinned
-# message survives independently of our server. On startup, before
-# creating a fresh DB, we check that pinned message and restore from it.
-def _snapshot_db_bytes():
-    tmp_path = DB_PATH + ".snapshot"
-    conn = get_conn()
-    conn.execute("VACUUM INTO ?", (tmp_path,))
-    conn.close()
-    with open(tmp_path, "rb") as f:
-        data = f.read()
-    os.remove(tmp_path)
-    return data
-
-
-async def backup_db_to_telegram(context: ContextTypes.DEFAULT_TYPE):
-    if ADMIN_CHAT_ID == 0:
-        return
-    try:
-        data = _snapshot_db_bytes()
-        file_obj = io.BytesIO(data)
-        file_obj.name = "habit_bot.db"
-        msg = await context.bot.send_document(
-            chat_id=ADMIN_CHAT_ID,
-            document=InputFile(file_obj),
-            # caption=f"🗄 Auto-backup — {datetime.now(TZ).strftime('%Y-%m-%d %H:%M')}",
-            # disable_notification=True,
-        )
-        try:
-            await context.bot.unpin_all_chat_messages(chat_id=ADMIN_CHAT_ID)
-        except Exception:
-            pass  # nothing pinned yet, or not enough rights — still try to pin the new one
-        await context.bot.pin_chat_message(chat_id=ADMIN_CHAT_ID, message_id=msg.message_id, disable_notification=True)
-    except Exception as exc:
-        logger.warning("DB backup to Telegram failed: %s", exc)
-
-
-async def restore_db_from_telegram():
-    if os.path.exists(DB_PATH):
-        logger.info("Local database already present — skipping restore.")
-        return
-    if ADMIN_CHAT_ID == 0:
-        logger.warning("ADMIN_CHAT_ID is not set — cannot restore from Telegram, starting with a fresh database.")
-        return
-
-    bot = Bot(token=BOT_TOKEN)
-    await bot.initialize()
-    try:
-        chat = await bot.get_chat(ADMIN_CHAT_ID)
-        pinned = chat.pinned_message
-        if pinned and pinned.document:
-            file = await bot.get_file(pinned.document.file_id)
-            await file.download_to_drive(DB_PATH)
-            logger.info("Restored habit_bot.db from the pinned Telegram backup.")
-        else:
-            logger.info("No pinned backup found in the admin chat — starting with a fresh database.")
-    except Exception as exc:
-        logger.warning("Could not restore database from Telegram: %s", exc)
-    finally:
-        await bot.shutdown()
-
 
 # ------------------------------------------------------------------
 # SCHEDULING
@@ -915,23 +900,6 @@ async def schedule_all_users(application: Application):
         schedule_all_times_for_user(application, chat_id)
 
 
-async def weekly_backup_job(context: ContextTypes.DEFAULT_TYPE):
-    if is_maintenance_on():
-        return
-    conn = get_conn()
-    chat_ids = [row["chat_id"] for row in conn.execute("SELECT chat_id FROM users").fetchall()]
-    conn.close()
-    for chat_id in chat_ids:
-        try:
-            lang = get_user_language(chat_id)
-            payload = build_user_export(chat_id)
-            file_obj = io.BytesIO(payload.encode("utf-8"))
-            file_obj.name = f"habit_backup_{chat_id}_{today_str()}.json"
-            await context.bot.send_document(chat_id=chat_id, document=InputFile(file_obj), caption=t(lang, "export_caption"))
-        except Exception as exc:
-            logger.warning("Weekly backup failed for chat_id=%s: %s", chat_id, exc)
-
-
 # ------------------------------------------------------------------
 # WEB DASHBOARD (control panel + UptimeRobot keep-alive on Render free tier)
 # ------------------------------------------------------------------
@@ -939,48 +907,91 @@ flask_app = Flask(__name__)
 flask_app.secret_key = FLASK_SECRET_KEY
 
 DASHBOARD_CSS = """
-:root{--bg:#0f1115;--card:#171a21;--border:#262a33;--text:#e7e9ee;--muted:#8b90a0;
-      --accent:#5b8cff;--good:#39d98a;--bad:#ff5c72;--warn:#ffb454;}
+:root{
+  --bg:#0a0c10; --bg-glow:#12162080;
+  --card:#141821; --card-hi:#171c27; --border:#232838; --border-hi:#31384c;
+  --text:#eef0f5; --muted:#8890a4; --muted-dim:#5c637a;
+  --accent:#6d8bff; --accent-2:#8f6dff; --good:#3ddc97; --bad:#ff6b81; --warn:#ffbd5c;
+  --radius:16px;
+}
 *{box-sizing:border-box;}
-body{margin:0;background:var(--bg);color:var(--text);
-     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
-.wrap{max-width:960px;margin:0 auto;padding:32px 20px 60px;}
-h1{font-size:22px;margin:0 0 4px;}
-.sub{color:var(--muted);font-size:13px;margin:0 0 28px;}
-.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:18px;}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:18px;}
-.grid2{display:grid;grid-template-columns:1fr 1.3fr;gap:18px;margin-bottom:18px;}
-@media (max-width:700px){.grid2{grid-template-columns:1fr;}}
-.stat{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;}
-.stat .n{font-size:26px;font-weight:700;}
-.stat .l{color:var(--muted);font-size:12px;margin-top:4px;}
-.badge{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;font-size:13px;font-weight:600;}
-.badge.on{background:rgba(255,92,114,.15);color:var(--bad);}
-.badge.off{background:rgba(57,217,138,.15);color:var(--good);}
+body{
+  margin:0; background:
+    radial-gradient(1100px 500px at 15% -10%, var(--bg-glow), transparent 60%),
+    radial-gradient(900px 500px at 100% 0%, #6d8bff14, transparent 55%),
+    var(--bg);
+  color:var(--text); min-height:100vh;
+  font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+.wrap{max-width:1040px;margin:0 auto;padding:36px 20px 64px;}
+.topbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:26px;}
+.brand{display:flex;align-items:center;gap:12px;}
+.brand .logo{
+  width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;
+  font-size:20px;background:linear-gradient(135deg,var(--accent),var(--accent-2));
+  box-shadow:0 6px 18px -6px #6d8bff70;
+}
+h1{font-size:20px;margin:0 0 2px;font-weight:700;letter-spacing:-.01em;}
+.sub{color:var(--muted);font-size:13px;margin:0;}
+.logout-link{color:var(--muted);text-decoration:none;font-size:13px;padding:8px 14px;border:1px solid var(--border);border-radius:10px;transition:.15s;}
+.logout-link:hover{color:var(--text);border-color:var(--border-hi);}
+.card{
+  background:linear-gradient(180deg,var(--card-hi),var(--card));
+  border:1px solid var(--border);border-radius:var(--radius);padding:22px;margin-bottom:16px;
+  box-shadow:0 1px 0 #ffffff05 inset;
+}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:16px;}
+.grid2{display:grid;grid-template-columns:1fr 1.25fr;gap:16px;margin-bottom:16px;}
+@media (max-width:720px){.grid2{grid-template-columns:1fr;}}
+.stat{
+  background:linear-gradient(180deg,var(--card-hi),var(--card));
+  border:1px solid var(--border);border-radius:var(--radius);padding:18px;
+}
+.stat .n{font-size:28px;font-weight:800;letter-spacing:-.02em;background:linear-gradient(135deg,#fff,#b9c2e0);-webkit-background-clip:text;background-clip:text;color:transparent;}
+.stat .l{color:var(--muted);font-size:12px;margin-top:6px;font-weight:500;}
+.badge{display:inline-flex;align-items:center;gap:7px;padding:6px 14px;border-radius:999px;font-size:13px;font-weight:600;border:1px solid transparent;}
+.badge.on{background:#ff6b8117;color:var(--bad);border-color:#ff6b8130;}
+.badge.off{background:#3ddc9717;color:var(--good);border-color:#3ddc9730;}
+.badge.cloud{background:#6d8bff17;color:var(--accent);border-color:#6d8bff30;}
+.badge.local{background:#ffbd5c17;color:var(--warn);border-color:#ffbd5c30;}
+.badge-row{display:flex;gap:10px;flex-wrap:wrap;}
 .row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;}
-button{background:var(--accent);color:#fff;border:none;border-radius:10px;padding:10px 18px;
-       font-size:14px;font-weight:600;cursor:pointer;}
-button.danger{background:var(--bad);}
-button.ghost{background:transparent;border:1px solid var(--border);color:var(--text);}
+button{
+  background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;border:none;border-radius:11px;
+  padding:11px 20px;font-size:14px;font-weight:600;cursor:pointer;transition:.15s;box-shadow:0 4px 14px -6px #6d8bff60;
+}
+button:hover{filter:brightness(1.08);transform:translateY(-1px);}
+button.danger{background:linear-gradient(135deg,#ff6b81,#ff4d6d);box-shadow:0 4px 14px -6px #ff6b8160;}
+button.ghost{background:transparent;border:1px solid var(--border-hi);color:var(--text);box-shadow:none;}
 table{width:100%;border-collapse:collapse;font-size:13px;}
-th{text-align:left;color:var(--muted);font-weight:600;padding:8px 10px;border-bottom:1px solid var(--border);}
-td{padding:8px 10px;border-bottom:1px solid var(--border);}
+th{text-align:left;color:var(--muted-dim);font-weight:600;padding:10px 12px;border-bottom:1px solid var(--border);
+   text-transform:uppercase;font-size:11px;letter-spacing:.04em;}
+td{padding:10px 12px;border-bottom:1px solid var(--border);}
 tr:last-child td{border-bottom:none;}
-.empty{color:var(--muted);font-size:13px;padding:8px 0;}
-h2{font-size:15px;margin:0 0 14px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
-input[type=password]{width:100%;padding:12px;border-radius:10px;border:1px solid var(--border);
-       background:#0d0f14;color:var(--text);font-size:14px;margin-bottom:14px;}
-.login-box{max-width:340px;margin:80px auto;}
-.err{color:var(--bad);font-size:13px;margin-bottom:10px;}
-a{color:var(--accent);text-decoration:none;font-size:13px;}
+tr:hover td{background:#ffffff03;}
+.empty{color:var(--muted);font-size:13px;padding:10px 0;}
+h2{font-size:13px;margin:0 0 16px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:700;}
+input[type=password]{
+  width:100%;padding:13px 14px;border-radius:11px;border:1px solid var(--border);
+  background:#0d1017;color:var(--text);font-size:14px;margin-bottom:14px;outline:none;transition:.15s;
+}
+input[type=password]:focus{border-color:var(--accent);}
+.login-box{max-width:360px;margin:100px auto 0;}
+.login-box .card{text-align:center;}
+.login-box .logo{width:52px;height:52px;font-size:24px;margin:0 auto 16px;}
+.err{color:var(--bad);font-size:13px;margin-bottom:10px;background:#ff6b8112;padding:8px 12px;border-radius:8px;}
+a{color:var(--accent);text-decoration:none;}
 """
 
 LOGIN_HTML = """
 <!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <title>Habit Bot — Login</title><style>{{ css }}</style></head>
 <body><div class="wrap login-box"><div class="card">
-<h1>🔒 Habit Bot Dashboard</h1><p class="sub">Enter the admin password to continue.</p>
+<div class="logo" style="border-radius:14px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,var(--accent),var(--accent-2));box-shadow:0 6px 18px -6px #6d8bff70;">🔒</div>
+<h1>Habit Bot Dashboard</h1><p class="sub" style="margin-bottom:22px;">Enter the admin password to continue.</p>
 {% if error %}<p class="err">{{ error }}</p>{% endif %}
 <form method="post"><input type="password" name="password" placeholder="Password" autofocus>
 <button type="submit" style="width:100%">Log in</button></form>
@@ -990,16 +1001,26 @@ LOGIN_HTML = """
 DASHBOARD_HTML = """
 <!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <title>Habit Bot — Dashboard</title><style>{{ css }}</style></head>
 <body><div class="wrap">
-<div class="row"><div>
-<h1>📊 Daily Habit Bot</h1><p class="sub">Control panel &amp; live stats</p>
-</div><a href="{{ url_for('logout') }}">Log out</a></div>
+
+<div class="topbar">
+  <div class="brand">
+    <div class="logo">📊</div>
+    <div><h1>Daily Habit Bot</h1><p class="sub">Control panel &amp; live stats</p></div>
+  </div>
+  <a class="logout-link" href="{{ url_for('logout') }}">Log out</a>
+</div>
 
 <div class="card row">
-  <div>
+  <div class="badge-row">
     <span class="badge {{ 'on' if maintenance else 'off' }}">
       {{ '🛠 Maintenance ON' if maintenance else '✅ Running normally' }}
+    </span>
+    <span class="badge {{ 'cloud' if db_synced else 'local' }}">
+      {{ '☁️ Turso Cloud — data is permanent' if db_synced else '💾 Local only — data resets on redeploy' }}
     </span>
   </div>
   <form method="post" action="{{ url_for('toggle_maintenance') }}">
@@ -1054,9 +1075,10 @@ DASHBOARD_HTML = """
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
 <script>
-  const gridColor = "#262a33", textColor = "#8b90a0";
+  const gridColor = "#232838", textColor = "#8890a4";
   Chart.defaults.color = textColor;
   Chart.defaults.borderColor = gridColor;
+  Chart.defaults.font.family = "Inter, sans-serif";
 
   const checkinData = {{ checkin_series_json | safe }};
   new Chart(document.getElementById('checkinChart'), {
@@ -1064,13 +1086,13 @@ DASHBOARD_HTML = """
     data: {
       labels: checkinData.labels,
       datasets: [
-        { label: 'Done', data: checkinData.done, backgroundColor: '#39d98a', stack: 's' },
-        { label: 'Missed', data: checkinData.missed, backgroundColor: '#ff5c72', stack: 's' }
+        { label: 'Done', data: checkinData.done, backgroundColor: '#3ddc97', borderRadius: 4, stack: 's' },
+        { label: 'Missed', data: checkinData.missed, backgroundColor: '#ff6b81', borderRadius: 4, stack: 's' }
       ]
     },
     options: {
       responsive: true,
-      scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } } },
+      scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } } },
       plugins: { legend: { position: 'bottom' } }
     }
   });
@@ -1081,9 +1103,9 @@ DASHBOARD_HTML = """
     type: 'doughnut',
     data: {
       labels: langData.labels,
-      datasets: [{ data: langData.counts, backgroundColor: ['#5b8cff', '#ffb454', '#39d98a'] }]
+      datasets: [{ data: langData.counts, backgroundColor: ['#6d8bff', '#ffbd5c', '#3ddc97'], borderWidth: 0 }]
     },
-    options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+    options: { responsive: true, cutout: '65%', plugins: { legend: { position: 'bottom' } } }
   });
   {% endif %}
 </script>
@@ -1194,6 +1216,7 @@ def dashboard():
         DASHBOARD_HTML,
         css=DASHBOARD_CSS,
         maintenance=is_maintenance_on(),
+        db_synced=USE_TURSO,
         stats=_dashboard_stats(),
         top_streaks=_top_streaks(),
         users=_user_rows(),
@@ -1219,18 +1242,6 @@ def run_dashboard():
 # ------------------------------------------------------------------
 async def post_init(application: Application):
     await schedule_all_users(application)
-    application.job_queue.run_daily(
-        callback=weekly_backup_job,
-        time=time(hour=BACKUP_HOUR, minute=BACKUP_MINUTE, tzinfo=TZ),
-        days=(BACKUP_WEEKDAY,),
-        name="weekly_backup",
-    )
-    application.job_queue.run_repeating(
-        callback=backup_db_to_telegram,
-        interval=timedelta(minutes=30),
-        first=60,
-        name="db_backup",
-    )
 
 
 def main():
@@ -1239,7 +1250,6 @@ def main():
         logger.error("BOT_TOKEN not found. Available env var keys: %s", env_keys)
         raise RuntimeError("Set the BOT_TOKEN environment variable before running.")
 
-    asyncio.run(restore_db_from_telegram())
     init_db()
 
     if DASHBOARD_PASSWORD == "changeme":
@@ -1259,10 +1269,8 @@ def main():
     application.add_handler(CommandHandler("checkin", manual_checkin))
     application.add_handler(CommandHandler("stats", stats))
     application.add_handler(CommandHandler("export", export_command))
-    application.add_handler(CommandHandler("exportexcel", export_excel_command))
     application.add_handler(CommandHandler("language", language_command))
     application.add_handler(CommandHandler("maintenance", maintenance_command))
-    application.add_handler(CommandHandler("backupnow", backupnow_command))
     application.add_handler(CallbackQueryHandler(button_handler))
 
     logger.info("Bot starting...")
