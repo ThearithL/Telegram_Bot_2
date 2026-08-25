@@ -672,6 +672,24 @@ def _mytasks_text(chat_id, lang):
     return "\n".join(lines)
 
 
+def empty_tasks_keyboard(lang):
+    """Shown wherever there are no tasks yet — offers a direct 'Add Task'
+    tap instead of leaving the person to type /addtask themselves."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(t(lang, "menu_btn_addtask"), callback_data="menu:addtask")],
+        [InlineKeyboardButton(t(lang, "menu_btn_back"), callback_data="menu:show")],
+    ])
+
+
+def empty_times_keyboard(lang):
+    """Shown wherever there are no reminder times yet — offers a direct
+    'Add Time' tap instead of leaving the person to type /addtime."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(t(lang, "menu_btn_addtime"), callback_data="menu:addtime")],
+        [InlineKeyboardButton(t(lang, "menu_btn_back"), callback_data="menu:show")],
+    ])
+
+
 def build_quicktask_keyboard(chat_id, lang):
     """One tappable button per task, showing today's ✅/⬜ status. Tapping
     a task immediately marks it done/not-done for today — no separate
@@ -702,7 +720,7 @@ async def my_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += t(lang, "mytasks_quick_header")
         await update.message.reply_text(text, reply_markup=build_quicktask_keyboard(chat_id, lang))
     else:
-        await update.message.reply_text(text, reply_markup=back_to_menu_keyboard(lang))
+        await update.message.reply_text(text, reply_markup=empty_tasks_keyboard(lang))
 
 
 def _parse_hhmm(text):
@@ -806,7 +824,11 @@ def _mytimes_text(chat_id, lang):
 async def my_times(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     lang = get_user_language(chat_id)
-    await update.message.reply_text(_mytimes_text(chat_id, lang), reply_markup=back_to_menu_keyboard(lang))
+    conn = get_conn()
+    has_times = conn.execute("SELECT id FROM reminder_times WHERE chat_id=?", (chat_id,)).fetchone()
+    conn.close()
+    kb = back_to_menu_keyboard(lang) if has_times else empty_times_keyboard(lang)
+    await update.message.reply_text(_mytimes_text(chat_id, lang), reply_markup=kb)
 
 
 def _stats_text(chat_id, lang):
@@ -1099,9 +1121,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text = _mytasks_text(chat_id, lang) + t(lang, "mytasks_quick_header")
                 await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=build_quicktask_keyboard(chat_id, lang))
             else:
-                await context.bot.send_message(chat_id=chat_id, text=t(lang, "mytasks_empty"), reply_markup=back_to_menu_keyboard(lang))
+                await context.bot.send_message(chat_id=chat_id, text=t(lang, "mytasks_empty"), reply_markup=empty_tasks_keyboard(lang))
         elif action == "mytimes":
-            await context.bot.send_message(chat_id=chat_id, text=_mytimes_text(chat_id, lang), reply_markup=back_to_menu_keyboard(lang))
+            conn = get_conn()
+            has_times = conn.execute("SELECT id FROM reminder_times WHERE chat_id=?", (chat_id,)).fetchone()
+            conn.close()
+            kb = back_to_menu_keyboard(lang) if has_times else empty_times_keyboard(lang)
+            await context.bot.send_message(chat_id=chat_id, text=_mytimes_text(chat_id, lang), reply_markup=kb)
         elif action == "stats":
             await context.bot.send_message(chat_id=chat_id, text=_stats_text(chat_id, lang), reply_markup=back_to_menu_keyboard(lang))
         elif action == "checkin":
@@ -1125,7 +1151,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             tasks = conn.execute("SELECT id, name FROM tasks WHERE chat_id=?", (chat_id,)).fetchall()
             conn.close()
             if not tasks:
-                await context.bot.send_message(chat_id=chat_id, text=t(lang, "mytasks_empty"), reply_markup=back_to_menu_keyboard(lang))
+                await context.bot.send_message(chat_id=chat_id, text=t(lang, "mytasks_empty"), reply_markup=empty_tasks_keyboard(lang))
             else:
                 rows = [[InlineKeyboardButton(f"🗑️ {row['name']}", callback_data=f"rmtask:{row['id']}")] for row in tasks]
                 rows.append([InlineKeyboardButton(t(lang, "btn_cancel"), callback_data="menu:show")])
@@ -1135,7 +1161,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             times = conn.execute("SELECT hour, minute FROM reminder_times WHERE chat_id=? ORDER BY hour, minute", (chat_id,)).fetchall()
             conn.close()
             if not times:
-                await context.bot.send_message(chat_id=chat_id, text=t(lang, "mytimes_empty"), reply_markup=back_to_menu_keyboard(lang))
+                await context.bot.send_message(chat_id=chat_id, text=t(lang, "mytimes_empty"), reply_markup=empty_times_keyboard(lang))
             else:
                 rows = [[InlineKeyboardButton(f"🗑️ {row['hour']:02d}:{row['minute']:02d}", callback_data=f"rmtime:{row['hour']}:{row['minute']}")] for row in times]
                 rows.append([InlineKeyboardButton(t(lang, "btn_cancel"), callback_data="menu:show")])
