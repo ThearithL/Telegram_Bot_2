@@ -1,4 +1,3 @@
-
 ## Button menu
 Besides typing commands, you now get two menus:
 - **Telegram's native "☰" menu** (next to the text box) lists every
@@ -13,6 +12,20 @@ Besides typing commands, you now get two menus:
 
 ## Changelog
 
+- **Improved:** the `/menu` button grid is now fully tap-driven — no more
+  typing required for day-to-day use:
+  - **My Tasks** now shows a live ✅/⬜ checklist. Tap a task to mark it
+    done/not-done for today instantly — no separate confirm step (that's
+    still only needed for the scheduled `/checkin` reminder, which lets
+    you tick several tasks before confirming).
+  - **Add Task** / **Add Time** now ask "send me the name" / "send me the
+    time" right in the chat, with a **Cancel** button, instead of just
+    showing the `/addtask <name>` usage line.
+  - **Remove Task** / **Remove Time** now list your existing tasks/times
+    as buttons — tap one to remove it, no typing or exact spelling needed.
+  - Nearly every reply (task lists, stats, check-in confirmation, add/
+    remove results, help) now carries a **🔙 Back to Menu** button so you
+    can keep navigating without retyping `/menu`.
 - **Fixed:** streak could get wrongly reset to 1 if a task was confirmed
   at more than one reminder time on the same day. It's now left unchanged
   once already checked in for the day.

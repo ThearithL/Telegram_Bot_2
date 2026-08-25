@@ -46,7 +46,9 @@ from telegram.ext import (
     Application,
     CommandHandler,
     CallbackQueryHandler,
+    MessageHandler,
     ContextTypes,
+    filters,
 )
 
 try:
@@ -93,6 +95,11 @@ if TURSO_DATABASE_URL and TURSO_AUTH_TOKEN and libsql is None:
 # In-memory: pending (not-yet-confirmed) check-in state per chat_id
 # { chat_id: { task_id: bool } }
 pending_checkins = {}
+
+# In-memory: which chat_ids are currently expected to type a plain-text
+# reply for a menu action (e.g. the task name after tapping "Add Task"),
+# and which action that reply is for. { chat_id: "addtask" | "addtime" }
+awaiting_input = {}
 
 
 # ------------------------------------------------------------------
@@ -215,7 +222,15 @@ TEXT = {
     "menu_btn_addtime": {"km": "⏰➕ បន្ថែមម៉ោង", "en": "⏰➕ Add Time"},
     "menu_btn_removetime": {"km": "⏰➖ លុបម៉ោង", "en": "⏰➖ Remove Time"},
     "menu_btn_help": {"km": "❓ ជំនួយ", "en": "❓ Help"},
+    "menu_btn_back": {"km": "🔙 ត្រឡប់ទៅម៉ឺនុយ", "en": "🔙 Back to Menu"},
     "menu_open_hint": {"km": "ប្រើ /menu ដើម្បីមើលម៉ឺនុយម្តងទៀត។", "en": "Use /menu any time to see this again."},
+    "btn_cancel": {"km": "❌ បោះបង់", "en": "❌ Cancel"},
+    "input_cancelled": {"km": "❎ បានបោះបង់។", "en": "❎ Cancelled."},
+    "addtask_prompt": {"km": "✏️ សូមវាយឈ្មោះ task ដែលអ្នកចង់បន្ថែម ហើយផ្ញើមកខ្ញុំ៖", "en": "✏️ Type the name of the task you'd like to add and send it to me:"},
+    "removetask_pick": {"km": "🗑️ ចុចលើ task ដែលអ្នកចង់លុប៖", "en": "🗑️ Tap a task to remove it:"},
+    "addtime_prompt": {"km": "⏰ សូមផ្ញើម៉ោង (ទម្រង់ HH:MM ដូចជា 07:30) ដែលអ្នកចង់បន្ថែម៖", "en": "⏰ Send the time you'd like to add, in HH:MM format (e.g. 07:30):"},
+    "removetime_pick": {"km": "🗑️ ចុចលើម៉ោងដែលអ្នកចង់លុប៖", "en": "🗑️ Tap a reminder time to remove it:"},
+    "mytasks_quick_header": {"km": "\n\n👉 ចុចលើ task ណាមួយដើម្បីសម្គាល់ថាបានធ្វើ/មិនទាន់ធ្វើសម្រាប់ថ្ងៃនេះ៖", "en": "\n\n👉 Tap any task to mark it done / not done for today:"},
 }
 
 BADGE_NAMES = {
@@ -469,6 +484,7 @@ def yesterday_str():
 @maintenance_guard
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
+    awaiting_input.pop(chat_id, None)
     ensure_user(chat_id)
 
     conn = get_conn()
@@ -529,9 +545,22 @@ def build_menu_keyboard(lang):
     return InlineKeyboardMarkup(rows)
 
 
+def back_to_menu_keyboard(lang):
+    """A single 'Back to Menu' button, attached to most action replies so
+    the user never has to type /menu to keep navigating."""
+    return InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, "menu_btn_back"), callback_data="menu:show")]])
+
+
+def cancel_keyboard(lang):
+    """Shown while the bot is waiting for a typed reply (add task / add
+    time), so the user can back out without sending anything."""
+    return InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, "btn_cancel"), callback_data="cancel_input")]])
+
+
 @maintenance_guard
 async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
+    awaiting_input.pop(chat_id, None)
     lang = get_user_language(chat_id)
     await update.message.reply_text(t(lang, "menu_title"), reply_markup=build_menu_keyboard(lang))
 
@@ -543,6 +572,42 @@ async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(t(lang, "language_prompt"), reply_markup=build_language_keyboard())
 
 
+def _add_task_core(chat_id, lang, name):
+    """Shared by /addtask (typed args) and the menu's conversational
+    'Add Task' flow. Returns (reply_text, success)."""
+    name = (name or "").strip()
+    if not name:
+        return t(lang, "addtask_usage"), False
+
+    conn = get_conn()
+    existing = conn.execute("SELECT id FROM tasks WHERE chat_id=? AND name=?", (chat_id, name)).fetchone()
+    if existing:
+        conn.close()
+        return t(lang, "addtask_duplicate", name=name), False
+
+    conn.execute("INSERT INTO tasks (chat_id, name) VALUES (?, ?)", (chat_id, name))
+    conn.commit()
+    conn.close()
+    return t(lang, "addtask_success", name=name), True
+
+
+def _remove_task_core(chat_id, lang, name):
+    """Shared by /removetask (typed args) and the tap-to-remove menu flow.
+    Returns (reply_text, success)."""
+    name = (name or "").strip()
+    conn = get_conn()
+    task = conn.execute("SELECT id FROM tasks WHERE chat_id=? AND name=?", (chat_id, name)).fetchone()
+    if not task:
+        conn.close()
+        return t(lang, "removetask_notfound", name=name), False
+
+    conn.execute("DELETE FROM tasks WHERE id=?", (task["id"],))
+    conn.execute("DELETE FROM logs WHERE task_id=?", (task["id"],))
+    conn.commit()
+    conn.close()
+    return t(lang, "removetask_success", name=name), True
+
+
 @maintenance_guard
 async def add_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -551,18 +616,8 @@ async def add_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(t(lang, "addtask_usage"))
         return
     name = " ".join(context.args).strip()
-
-    conn = get_conn()
-    existing = conn.execute("SELECT id FROM tasks WHERE chat_id=? AND name=?", (chat_id, name)).fetchone()
-    if existing:
-        await update.message.reply_text(t(lang, "addtask_duplicate", name=name))
-        conn.close()
-        return
-
-    conn.execute("INSERT INTO tasks (chat_id, name) VALUES (?, ?)", (chat_id, name))
-    conn.commit()
-    conn.close()
-    await update.message.reply_text(t(lang, "addtask_success", name=name))
+    msg, ok = _add_task_core(chat_id, lang, name)
+    await update.message.reply_text(msg, reply_markup=back_to_menu_keyboard(lang) if ok else None)
 
 
 @maintenance_guard
@@ -573,19 +628,8 @@ async def remove_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(t(lang, "removetask_usage"))
         return
     name = " ".join(context.args).strip()
-
-    conn = get_conn()
-    task = conn.execute("SELECT id FROM tasks WHERE chat_id=? AND name=?", (chat_id, name)).fetchone()
-    if not task:
-        await update.message.reply_text(t(lang, "removetask_notfound", name=name))
-        conn.close()
-        return
-
-    conn.execute("DELETE FROM tasks WHERE id=?", (task["id"],))
-    conn.execute("DELETE FROM logs WHERE task_id=?", (task["id"],))
-    conn.commit()
-    conn.close()
-    await update.message.reply_text(t(lang, "removetask_success", name=name))
+    msg, ok = _remove_task_core(chat_id, lang, name)
+    await update.message.reply_text(msg, reply_markup=back_to_menu_keyboard(lang) if ok else None)
 
 
 def _mytasks_text(chat_id, lang):
@@ -602,11 +646,37 @@ def _mytasks_text(chat_id, lang):
     return "\n".join(lines)
 
 
+def build_quicktask_keyboard(chat_id, lang):
+    """One tappable button per task, showing today's ✅/⬜ status. Tapping
+    a task immediately marks it done/not-done for today — no separate
+    Confirm step needed, unlike the full /checkin flow."""
+    conn = get_conn()
+    tasks = conn.execute("SELECT id, name FROM tasks WHERE chat_id=?", (chat_id,)).fetchall()
+    date = today_str()
+    rows = []
+    for row in tasks:
+        log = conn.execute("SELECT done FROM logs WHERE task_id=? AND date=?", (row["id"], date)).fetchone()
+        checked = bool(log["done"]) if log else False
+        label = f"{'✅' if checked else '⬜'} {row['name']}"
+        rows.append([InlineKeyboardButton(label, callback_data=f"qtoggle:{row['id']}")])
+    conn.close()
+    rows.append([InlineKeyboardButton(t(lang, "menu_btn_back"), callback_data="menu:show")])
+    return InlineKeyboardMarkup(rows)
+
+
 @maintenance_guard
 async def my_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     lang = get_user_language(chat_id)
-    await update.message.reply_text(_mytasks_text(chat_id, lang))
+    text = _mytasks_text(chat_id, lang)
+    conn = get_conn()
+    has_tasks = conn.execute("SELECT id FROM tasks WHERE chat_id=?", (chat_id,)).fetchone()
+    conn.close()
+    if has_tasks:
+        text += t(lang, "mytasks_quick_header")
+        await update.message.reply_text(text, reply_markup=build_quicktask_keyboard(chat_id, lang))
+    else:
+        await update.message.reply_text(text, reply_markup=back_to_menu_keyboard(lang))
 
 
 def _parse_hhmm(text):
@@ -616,35 +686,60 @@ def _parse_hhmm(text):
     return hour, minute
 
 
-@maintenance_guard
-async def add_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    lang = get_user_language(chat_id)
-    ensure_user(chat_id, lang)
-    if not context.args or ":" not in context.args[0]:
-        await update.message.reply_text(t(lang, "addtime_usage"))
-        return
+def _add_time_core(chat_id, lang, text_in):
+    """Shared by /addtime (typed args) and the menu's conversational
+    'Add Time' flow. Returns (reply_text, success)."""
+    text_in = (text_in or "").strip()
+    if ":" not in text_in:
+        return t(lang, "addtime_usage"), False
     try:
-        hour, minute = _parse_hhmm(context.args[0])
+        hour, minute = _parse_hhmm(text_in)
     except ValueError:
-        await update.message.reply_text(t(lang, "addtime_invalid"))
-        return
+        return t(lang, "addtime_invalid"), False
 
     conn = get_conn()
     existing = conn.execute(
         "SELECT id FROM reminder_times WHERE chat_id=? AND hour=? AND minute=?", (chat_id, hour, minute)
     ).fetchone()
     if existing:
-        await update.message.reply_text(t(lang, "addtime_exists", hour=hour, minute=minute))
         conn.close()
-        return
+        return t(lang, "addtime_exists", hour=hour, minute=minute), False
 
     conn.execute("INSERT INTO reminder_times (chat_id, hour, minute) VALUES (?, ?, ?)", (chat_id, hour, minute))
     conn.commit()
     conn.close()
+    return t(lang, "addtime_success", hour=hour, minute=minute), True
 
-    schedule_all_times_for_user(context.application, chat_id)
-    await update.message.reply_text(t(lang, "addtime_success", hour=hour, minute=minute))
+
+def _remove_time_core(chat_id, lang, hour, minute):
+    """Shared by /removetime (typed args) and the tap-to-remove menu flow.
+    Returns (reply_text, success)."""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT id FROM reminder_times WHERE chat_id=? AND hour=? AND minute=?", (chat_id, hour, minute)
+    ).fetchone()
+    if not row:
+        conn.close()
+        return t(lang, "removetime_notfound", hour=hour, minute=minute), False
+
+    conn.execute("DELETE FROM reminder_times WHERE id=?", (row["id"],))
+    conn.commit()
+    conn.close()
+    return t(lang, "removetime_success", hour=hour, minute=minute), True
+
+
+@maintenance_guard
+async def add_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    lang = get_user_language(chat_id)
+    ensure_user(chat_id, lang)
+    if not context.args:
+        await update.message.reply_text(t(lang, "addtime_usage"))
+        return
+    msg, ok = _add_time_core(chat_id, lang, context.args[0])
+    if ok:
+        schedule_all_times_for_user(context.application, chat_id)
+    await update.message.reply_text(msg, reply_markup=back_to_menu_keyboard(lang) if ok else None)
 
 
 @maintenance_guard
@@ -659,22 +754,10 @@ async def remove_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         await update.message.reply_text(t(lang, "addtime_invalid"))
         return
-
-    conn = get_conn()
-    row = conn.execute(
-        "SELECT id FROM reminder_times WHERE chat_id=? AND hour=? AND minute=?", (chat_id, hour, minute)
-    ).fetchone()
-    if not row:
-        await update.message.reply_text(t(lang, "removetime_notfound", hour=hour, minute=minute))
-        conn.close()
-        return
-
-    conn.execute("DELETE FROM reminder_times WHERE id=?", (row["id"],))
-    conn.commit()
-    conn.close()
-
-    schedule_all_times_for_user(context.application, chat_id)
-    await update.message.reply_text(t(lang, "removetime_success", hour=hour, minute=minute))
+    msg, ok = _remove_time_core(chat_id, lang, hour, minute)
+    if ok:
+        schedule_all_times_for_user(context.application, chat_id)
+    await update.message.reply_text(msg, reply_markup=back_to_menu_keyboard(lang) if ok else None)
 
 
 def _mytimes_text(chat_id, lang):
@@ -697,7 +780,7 @@ def _mytimes_text(chat_id, lang):
 async def my_times(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     lang = get_user_language(chat_id)
-    await update.message.reply_text(_mytimes_text(chat_id, lang))
+    await update.message.reply_text(_mytimes_text(chat_id, lang), reply_markup=back_to_menu_keyboard(lang))
 
 
 def _stats_text(chat_id, lang):
@@ -724,7 +807,7 @@ def _stats_text(chat_id, lang):
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     lang = get_user_language(chat_id)
-    await update.message.reply_text(_stats_text(chat_id, lang))
+    await update.message.reply_text(_stats_text(chat_id, lang), reply_markup=back_to_menu_keyboard(lang))
 
 
 def build_user_export_xlsx(chat_id):
@@ -809,6 +892,53 @@ def build_checkin_keyboard(chat_id, lang):
     return InlineKeyboardMarkup(rows)
 
 
+def _apply_checkin_for_task(conn, lang, task_id, done, date):
+    """Writes today's log entry for one task and updates its streak/best
+    streak/badges accordingly. Shared by the batch /checkin 'Confirm' flow
+    and the single-tap quick-toggle on the My Tasks menu.
+    Returns (summary_line, badge_lines) — summary_line is None if the task
+    no longer exists (e.g. deleted mid-checkin)."""
+    task_row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+    if not task_row:
+        return None, []
+
+    existing_log = conn.execute("SELECT id FROM logs WHERE task_id=? AND date=?", (task_id, date)).fetchone()
+    if existing_log:
+        conn.execute("UPDATE logs SET done=? WHERE id=?", (1 if done else 0, existing_log["id"]))
+    else:
+        conn.execute("INSERT INTO logs (task_id, date, done) VALUES (?, ?, ?)", (task_id, date, 1 if done else 0))
+
+    badge_lines = []
+    if done:
+        if task_row["last_done_date"] == date:
+            # Already checked in today (e.g. a second reminder time firing
+            # the same day, or re-tapping quick-toggle) — keep the streak
+            # as-is instead of recomputing it.
+            new_streak = task_row["streak"]
+        elif task_row["last_done_date"] == yesterday_str():
+            new_streak = task_row["streak"] + 1
+        else:
+            new_streak = 1
+        best = max(new_streak, task_row["best_streak"])
+        conn.execute(
+            "UPDATE tasks SET streak=?, best_streak=?, last_done_date=? WHERE id=?",
+            (new_streak, best, date, task_id),
+        )
+        summary = t(lang, "checkin_task_done", name=task_row["name"], streak=new_streak)
+
+        last_badge = task_row["last_badge"] or 0
+        for milestone in BADGE_MILESTONES:
+            if new_streak >= milestone > last_badge:
+                badge_name = BADGE_NAMES[milestone].get(lang, BADGE_NAMES[milestone]["en"])
+                badge_lines.append(t(lang, "badge_earned", badge=badge_name, name=task_row["name"], streak=new_streak))
+                conn.execute("UPDATE tasks SET last_badge=? WHERE id=?", (milestone, task_id))
+    else:
+        conn.execute("UPDATE tasks SET streak=0 WHERE id=?", (task_id,))
+        summary = t(lang, "checkin_task_reset", name=task_row["name"])
+
+    return summary, badge_lines
+
+
 async def send_checkin(chat_id, context: ContextTypes.DEFAULT_TYPE):
     if is_maintenance_on() and not is_admin(chat_id):
         return  # don't ping users with reminders while the bot is under maintenance
@@ -878,16 +1008,76 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
         conn.close()
         await query.edit_message_text(t(new_lang, "language_set"))
+        await context.bot.send_message(chat_id=chat_id, text=t(new_lang, "menu_title"), reply_markup=build_menu_keyboard(new_lang))
+        return
+
+    if query.data == "cancel_input":
+        awaiting_input.pop(chat_id, None)
+        await query.edit_message_text(t(lang, "input_cancelled"))
+        await context.bot.send_message(chat_id=chat_id, text=t(lang, "menu_title"), reply_markup=build_menu_keyboard(lang))
+        return
+
+    if query.data.startswith("rmtask:"):
+        task_id = int(query.data.split(":")[1])
+        conn = get_conn()
+        task = conn.execute("SELECT name FROM tasks WHERE id=? AND chat_id=?", (task_id, chat_id)).fetchone()
+        conn.close()
+        if task:
+            msg, _ok = _remove_task_core(chat_id, lang, task["name"])
+        else:
+            msg = t(lang, "removetask_notfound", name="")
+        await query.edit_message_text(msg, reply_markup=back_to_menu_keyboard(lang))
+        return
+
+    if query.data.startswith("rmtime:"):
+        _, hour_s, minute_s = query.data.split(":")
+        hour, minute = int(hour_s), int(minute_s)
+        msg, ok = _remove_time_core(chat_id, lang, hour, minute)
+        if ok:
+            schedule_all_times_for_user(context.application, chat_id)
+        await query.edit_message_text(msg, reply_markup=back_to_menu_keyboard(lang))
+        return
+
+    if query.data.startswith("qtoggle:"):
+        task_id = int(query.data.split(":")[1])
+        conn = get_conn()
+        task_owned = conn.execute("SELECT id FROM tasks WHERE id=? AND chat_id=?", (task_id, chat_id)).fetchone()
+        if not task_owned:
+            conn.close()
+            return
+        date = today_str()
+        log = conn.execute("SELECT done FROM logs WHERE task_id=? AND date=?", (task_id, date)).fetchone()
+        currently_done = bool(log["done"]) if log else False
+        summary, badge_lines = _apply_checkin_for_task(conn, lang, task_id, not currently_done, date)
+        conn.commit()
+        conn.close()
+        if summary is not None:
+            try:
+                await query.edit_message_reply_markup(reply_markup=build_quicktask_keyboard(chat_id, lang))
+            except Exception:
+                pass  # message unchanged (e.g. double-tap race) — safe to ignore
+            for badge_msg in badge_lines:
+                await context.bot.send_message(chat_id=chat_id, text=badge_msg)
         return
 
     if query.data.startswith("menu:"):
         action = query.data.split(":", 1)[1]
-        if action == "mytasks":
-            await context.bot.send_message(chat_id=chat_id, text=_mytasks_text(chat_id, lang))
+        if action == "show":
+            awaiting_input.pop(chat_id, None)
+            await context.bot.send_message(chat_id=chat_id, text=t(lang, "menu_title"), reply_markup=build_menu_keyboard(lang))
+        elif action == "mytasks":
+            conn = get_conn()
+            has_tasks = conn.execute("SELECT id FROM tasks WHERE chat_id=?", (chat_id,)).fetchone()
+            conn.close()
+            if has_tasks:
+                text = _mytasks_text(chat_id, lang) + t(lang, "mytasks_quick_header")
+                await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=build_quicktask_keyboard(chat_id, lang))
+            else:
+                await context.bot.send_message(chat_id=chat_id, text=t(lang, "mytasks_empty"), reply_markup=back_to_menu_keyboard(lang))
         elif action == "mytimes":
-            await context.bot.send_message(chat_id=chat_id, text=_mytimes_text(chat_id, lang))
+            await context.bot.send_message(chat_id=chat_id, text=_mytimes_text(chat_id, lang), reply_markup=back_to_menu_keyboard(lang))
         elif action == "stats":
-            await context.bot.send_message(chat_id=chat_id, text=_stats_text(chat_id, lang))
+            await context.bot.send_message(chat_id=chat_id, text=_stats_text(chat_id, lang), reply_markup=back_to_menu_keyboard(lang))
         elif action == "checkin":
             await send_checkin(chat_id, context)
         elif action == "export":
@@ -897,11 +1087,33 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif action == "language":
             await context.bot.send_message(chat_id=chat_id, text=t(lang, "language_prompt"), reply_markup=build_language_keyboard())
         elif action == "help":
-            await context.bot.send_message(chat_id=chat_id, text=t(lang, "welcome", hour=DEFAULT_REMINDER_HOUR, minute=DEFAULT_REMINDER_MINUTE))
-        elif action in ("addtask", "removetask", "addtime", "removetime"):
-            # These need typed input Telegram buttons can't pre-fill, so
-            # just show the usage line for that command.
-            await context.bot.send_message(chat_id=chat_id, text=t(lang, f"{action}_usage"))
+            await context.bot.send_message(chat_id=chat_id, text=t(lang, "welcome", hour=DEFAULT_REMINDER_HOUR, minute=DEFAULT_REMINDER_MINUTE), reply_markup=back_to_menu_keyboard(lang))
+        elif action == "addtask":
+            awaiting_input[chat_id] = "addtask"
+            await context.bot.send_message(chat_id=chat_id, text=t(lang, "addtask_prompt"), reply_markup=cancel_keyboard(lang))
+        elif action == "addtime":
+            awaiting_input[chat_id] = "addtime"
+            await context.bot.send_message(chat_id=chat_id, text=t(lang, "addtime_prompt"), reply_markup=cancel_keyboard(lang))
+        elif action == "removetask":
+            conn = get_conn()
+            tasks = conn.execute("SELECT id, name FROM tasks WHERE chat_id=?", (chat_id,)).fetchall()
+            conn.close()
+            if not tasks:
+                await context.bot.send_message(chat_id=chat_id, text=t(lang, "mytasks_empty"), reply_markup=back_to_menu_keyboard(lang))
+            else:
+                rows = [[InlineKeyboardButton(f"🗑️ {row['name']}", callback_data=f"rmtask:{row['id']}")] for row in tasks]
+                rows.append([InlineKeyboardButton(t(lang, "btn_cancel"), callback_data="menu:show")])
+                await context.bot.send_message(chat_id=chat_id, text=t(lang, "removetask_pick"), reply_markup=InlineKeyboardMarkup(rows))
+        elif action == "removetime":
+            conn = get_conn()
+            times = conn.execute("SELECT hour, minute FROM reminder_times WHERE chat_id=? ORDER BY hour, minute", (chat_id,)).fetchall()
+            conn.close()
+            if not times:
+                await context.bot.send_message(chat_id=chat_id, text=t(lang, "mytimes_empty"), reply_markup=back_to_menu_keyboard(lang))
+            else:
+                rows = [[InlineKeyboardButton(f"🗑️ {row['hour']:02d}:{row['minute']:02d}", callback_data=f"rmtime:{row['hour']}:{row['minute']}")] for row in times]
+                rows.append([InlineKeyboardButton(t(lang, "btn_cancel"), callback_data="menu:show")])
+                await context.bot.send_message(chat_id=chat_id, text=t(lang, "removetime_pick"), reply_markup=InlineKeyboardMarkup(rows))
         return
 
     if query.data == "snooze":
@@ -926,51 +1138,46 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         badge_lines = []
         date = today_str()
         for task_id, done in state.items():
-            task_row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
-            if not task_row:
+            summary, badges = _apply_checkin_for_task(conn, lang, task_id, done, date)
+            if summary is None:
                 continue
-
-            existing_log = conn.execute("SELECT id FROM logs WHERE task_id=? AND date=?", (task_id, date)).fetchone()
-            if existing_log:
-                conn.execute("UPDATE logs SET done=? WHERE id=?", (1 if done else 0, existing_log["id"]))
-            else:
-                conn.execute("INSERT INTO logs (task_id, date, done) VALUES (?, ?, ?)", (task_id, date, 1 if done else 0))
-
-            if done:
-                if task_row["last_done_date"] == date:
-                    # Already checked in today (e.g. a second reminder time
-                    # firing the same day) — keep the streak as-is instead
-                    # of recomputing it, or a same-day re-confirm would
-                    # wrongly collapse it back down to 1.
-                    new_streak = task_row["streak"]
-                elif task_row["last_done_date"] == yesterday_str():
-                    new_streak = task_row["streak"] + 1
-                else:
-                    new_streak = 1
-                best = max(new_streak, task_row["best_streak"])
-                conn.execute(
-                    "UPDATE tasks SET streak=?, best_streak=?, last_done_date=? WHERE id=?",
-                    (new_streak, best, date, task_id),
-                )
-                summary_lines.append(t(lang, "checkin_task_done", name=task_row["name"], streak=new_streak))
-
-                last_badge = task_row["last_badge"] or 0
-                for milestone in BADGE_MILESTONES:
-                    if new_streak >= milestone > last_badge:
-                        badge_name = BADGE_NAMES[milestone].get(lang, BADGE_NAMES[milestone]["en"])
-                        badge_lines.append(t(lang, "badge_earned", badge=badge_name, name=task_row["name"], streak=new_streak))
-                        conn.execute("UPDATE tasks SET last_badge=? WHERE id=?", (milestone, task_id))
-            else:
-                conn.execute("UPDATE tasks SET streak=0 WHERE id=?", (task_id,))
-                summary_lines.append(t(lang, "checkin_task_reset", name=task_row["name"]))
+            summary_lines.append(summary)
+            badge_lines.extend(badges)
 
         conn.commit()
         conn.close()
         pending_checkins.pop(chat_id, None)
 
-        await query.edit_message_text(t(lang, "checkin_done", date=date) + "\n".join(summary_lines))
+        await query.edit_message_text(t(lang, "checkin_done", date=date) + "\n".join(summary_lines), reply_markup=back_to_menu_keyboard(lang))
         for badge_msg in badge_lines:
             await context.bot.send_message(chat_id=chat_id, text=badge_msg)
+
+
+@maintenance_guard
+async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles a plain-text reply while the menu is waiting on one (e.g.
+    the task name after tapping 'Add Task'). Ignores any other stray text
+    — this bot only reacts to commands/buttons otherwise."""
+    chat_id = update.effective_chat.id
+    if chat_id not in awaiting_input:
+        return
+    lang = get_user_language(chat_id)
+    action = awaiting_input.pop(chat_id)
+    text_in = (update.message.text or "").strip()
+
+    if action == "addtask":
+        msg, ok = _add_task_core(chat_id, lang, text_in)
+    elif action == "addtime":
+        msg, ok = _add_time_core(chat_id, lang, text_in)
+        if ok:
+            schedule_all_times_for_user(context.application, chat_id)
+    else:
+        return
+
+    await update.message.reply_text(msg, reply_markup=back_to_menu_keyboard(lang) if ok else cancel_keyboard(lang))
+    if not ok:
+        # invalid input (e.g. bad time format) — keep waiting for another try
+        awaiting_input[chat_id] = action
 
 
 # ------------------------------------------------------------------
@@ -1446,6 +1653,7 @@ def main():
     application.add_handler(CommandHandler("language", language_command))
     application.add_handler(CommandHandler("maintenance", maintenance_command))
     application.add_handler(CallbackQueryHandler(button_handler))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_input))
     application.add_error_handler(error_handler)
 
     logger.info("Bot starting...")
