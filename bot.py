@@ -131,6 +131,18 @@ def random_quote(lang):
 # TRANSLATIONS
 # ------------------------------------------------------------------
 TEXT = {
+    "welcome_short": {
+        "km": (
+            "👋 សូមស្វាគមន៍មកកាន់ Daily Habit Bot!\n"
+            "ម៉ោងជូនដំណឹង default គឺ {hour:02d}:{minute:02d} (ម៉ោងកម្ពុជា)។\n\n"
+            "ប្រើប៊ូតុងខាងក្រោមដើម្បីចាប់ផ្តើម — មិនចាំបាច់វាយ command ទេ៖"
+        ),
+        "en": (
+            "👋 Welcome to your Daily Habit Bot!\n"
+            "Default reminder time is {hour:02d}:{minute:02d} (Phnom Penh time).\n\n"
+            "Use the buttons below to get started — no need to type commands:"
+        ),
+    },
     "welcome": {
         "km": (
             "👋 សូមស្វាគមន៍មកកាន់ Daily Habit Bot!\n\n"
@@ -500,10 +512,24 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     schedule_all_times_for_user(context.application, chat_id)
 
     lang = get_user_language(chat_id)
+    greeting = t(lang, "welcome_short", hour=DEFAULT_REMINDER_HOUR, minute=DEFAULT_REMINDER_MINUTE)
     await update.message.reply_text(
-        t(lang, "welcome", hour=DEFAULT_REMINDER_HOUR, minute=DEFAULT_REMINDER_MINUTE)
+        f"{greeting}\n\n{t(lang, 'menu_title')}", reply_markup=build_menu_keyboard(lang)
     )
-    await update.message.reply_text(t(lang, "menu_title"), reply_markup=build_menu_keyboard(lang))
+
+
+@maintenance_guard
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """The full typed-command reference, kept for anyone who prefers
+    typing over tapping. /start and the menu's 'Help' button both use
+    the short, buttons-first welcome instead."""
+    chat_id = update.effective_chat.id
+    awaiting_input.pop(chat_id, None)
+    lang = get_user_language(chat_id)
+    await update.message.reply_text(
+        t(lang, "welcome", hour=DEFAULT_REMINDER_HOUR, minute=DEFAULT_REMINDER_MINUTE),
+        reply_markup=back_to_menu_keyboard(lang),
+    )
 
 
 def build_language_keyboard():
@@ -1639,7 +1665,7 @@ def main():
     application = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
 
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", start))
+    application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("menu", menu_command))
     application.add_handler(CommandHandler("addtask", add_task))
     application.add_handler(CommandHandler("removetask", remove_task))
