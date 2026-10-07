@@ -28,6 +28,8 @@ Timezone:
 import os
 import io
 import json
+import hmac
+import hashlib
 import random
 import secrets
 import sqlite3
@@ -37,7 +39,7 @@ import threading
 from functools import wraps
 from datetime import datetime, time, timedelta, timezone
 
-from flask import Flask, request, redirect, url_for, session, render_template_string, Response
+from flask import Flask, request, redirect, url_for, session, render_template_string, Response, jsonify, send_from_directory
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
@@ -65,6 +67,8 @@ try:
 except ValueError as exc:
     raise RuntimeError("ADMIN_CHAT_ID must be a numeric Telegram chat ID.") from exc
 DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "").strip()  # web dashboard login
+MINI_APP_URL = os.environ.get("MINI_APP_URL", "").strip()
+TELEGRAM_BOT_USERNAME = os.environ.get("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@")
 FLASK_SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(32))
 TIMEZONE_OFFSET_HOURS = 7  # Asia/Phnom_Penh (UTC+7), no DST
 TZ = timezone(timedelta(hours=TIMEZONE_OFFSET_HOURS))
@@ -529,8 +533,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     lang = get_user_language(chat_id)
     greeting = t(lang, "welcome_short", hour=DEFAULT_REMINDER_HOUR, minute=DEFAULT_REMINDER_MINUTE)
+    keyboard = build_menu_keyboard(lang)
+    if MINI_APP_URL.startswith("https://"):
+        from telegram import WebAppInfo
+        keyboard.inline_keyboard.insert(0, [InlineKeyboardButton(
+            "📱 បើកកម្មវិធី / Open Mini App", web_app=WebAppInfo(url=MINI_APP_URL)
+        )])
     await update.message.reply_text(
-        f"{greeting}\n\n{t(lang, 'menu_title')}", reply_markup=build_menu_keyboard(lang)
+        f"{greeting}\n\n{t(lang, 'menu_title')}", reply_markup=keyboard
     )
 
 
@@ -1629,6 +1639,123 @@ def _language_breakdown():
     }
 
 
+def _mini_app_user():
+    """Validate Telegram Web App initData before exposing user data."""
+    from urllib.parse import parse_qsl
+    init_data = request.headers.get("X-Telegram-Init-Data", "")
+    if not init_data or not BOT_TOKEN:
+        return None
+    try:
+        parsed = dict(parse_qsl(init_data, keep_blank_values=True))
+        received_hash = parsed.pop("hash", "")
+        auth_date = int(parsed.get("auth_date", "0"))
+        if not received_hash or abs(datetime.now(timezone.utc).timestamp() - auth_date) > 86400:
+            return None
+        secret = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
+        data_check = "\n".join(f"{key}={value}" for key, value in sorted(parsed.items()))
+        expected = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(received_hash, expected):
+            return None
+        user = json.loads(parsed.get("user", "{}"))
+        return int(user["id"])
+    except (ValueError, TypeError, KeyError, json.JSONDecodeError):
+        return None
+
+
+@flask_app.route("/app")
+def mini_app():
+    return send_from_directory(os.path.join(os.path.dirname(__file__), "webapp"), "index.html")
+
+
+@flask_app.route("/webapp/<path:filename>")
+def mini_app_asset(filename):
+    return send_from_directory(os.path.join(os.path.dirname(__file__), "webapp"), filename)
+
+
+@flask_app.route("/api/miniapp/data")
+def mini_app_data():
+    chat_id = _mini_app_user()
+    if not chat_id:
+        return jsonify({"error": "Open this app from your Telegram bot."}), 401
+    ensure_user(chat_id)
+    lang = get_user_language(chat_id)
+    conn = get_conn()
+    tasks = conn.execute(
+        "SELECT id, name, streak, best_streak, weekly_goal FROM tasks WHERE chat_id=? ORDER BY id",
+        (chat_id,),
+    ).fetchall()
+    today = today_str()
+    cutoff = (datetime.now(TZ).date() - timedelta(days=6)).strftime("%Y-%m-%d")
+    result = []
+    for task in tasks:
+        log = conn.execute("SELECT done FROM logs WHERE task_id=? AND date=?", (task["id"], today)).fetchone()
+        count = conn.execute(
+            "SELECT COUNT(*) c FROM logs WHERE task_id=? AND date>=? AND done=1", (task["id"], cutoff)
+        ).fetchone()["c"]
+        result.append({"id": task["id"], "name": task["name"], "done": bool(log and log["done"]),
+                       "streak": task["streak"], "best": task["best_streak"],
+                       "goal": task["weekly_goal"] or 7, "week_done": count})
+    conn.close()
+    return jsonify({"language": lang, "date": today, "tasks": result})
+
+
+@flask_app.route("/api/miniapp/task", methods=["POST"])
+def mini_app_task():
+    chat_id = _mini_app_user()
+    if not chat_id:
+        return jsonify({"error": "Unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    name = str(data.get("name", "")).strip()
+    if not name or len(name) > 80:
+        return jsonify({"error": "Task name must be 1–80 characters."}), 400
+    lang = get_user_language(chat_id)
+    message, ok = _add_task_core(chat_id, lang, name)
+    if not ok:
+        return jsonify({"error": message}), 409
+    return jsonify({"ok": True})
+
+
+@flask_app.route("/api/miniapp/toggle", methods=["POST"])
+def mini_app_toggle():
+    chat_id = _mini_app_user()
+    if not chat_id:
+        return jsonify({"error": "Unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    try:
+        task_id = int(data.get("task_id"))
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid task."}), 400
+    lang = get_user_language(chat_id)
+    conn = get_conn()
+    task = conn.execute("SELECT id FROM tasks WHERE id=? AND chat_id=?", (task_id, chat_id)).fetchone()
+    if not task:
+        conn.close()
+        return jsonify({"error": "Task not found."}), 404
+    today = today_str()
+    row = conn.execute("SELECT done FROM logs WHERE task_id=? AND date=?", (task_id, today)).fetchone()
+    done = not bool(row and row["done"])
+    summary, badges = _apply_checkin_for_task(conn, lang, task_id, done, today)
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True, "done": done, "badges": badges})
+
+
+@flask_app.route("/api/miniapp/language", methods=["POST"])
+def mini_app_language():
+    chat_id = _mini_app_user()
+    if not chat_id:
+        return jsonify({"error": "Unauthorized"}), 401
+    lang = (request.get_json(silent=True) or {}).get("language")
+    if lang not in ("km", "en"):
+        return jsonify({"error": "Unsupported language."}), 400
+    ensure_user(chat_id, lang)
+    conn = get_conn()
+    conn.execute("UPDATE users SET language=? WHERE chat_id=?", (lang, chat_id))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True, "language": lang})
+
+
 @flask_app.route("/ping")
 def ping():
     return Response("OK - Daily Habit Bot is running", mimetype="text/plain")
@@ -1768,6 +1895,8 @@ def main():
         DASHBOARD_PASSWORD = secrets.token_urlsafe(24)
         logger.warning("DASHBOARD_PASSWORD was not set. Temporary dashboard password: %s", DASHBOARD_PASSWORD)
 
+    if not MINI_APP_URL and os.environ.get("RENDER_EXTERNAL_URL"):
+        globals()["MINI_APP_URL"] = os.environ["RENDER_EXTERNAL_URL"].rstrip("/") + "/app"
     threading.Thread(target=run_dashboard, daemon=True).start()
 
     application = Application.builder().token(BOT_TOKEN).post_init(post_init).build()

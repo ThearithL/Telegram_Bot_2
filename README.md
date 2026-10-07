@@ -16,6 +16,12 @@ Besides typing commands, you now get two menus:
 - `/goals` shows each task's completions during the last 7 days and a progress bar. The same report is available from **Weekly Goals** in `/menu`.
 - Existing tasks default to a target of 7. Startup adds the database column automatically, preserving existing local or Turso data.
 
+## Telegram Mini App
+
+The project includes a bilingual Mini App at `/app`. It shows today's habits, tap-to-check-in controls, streaks, and weekly-goal progress, with a button to add a habit. The Telegram `/start` message includes an **Open Mini App** button when a public HTTPS URL is configured.
+
+For Render, set `RENDER_EXTERNAL_URL` automatically if available; otherwise set `MINI_APP_URL` to your public address ending in `/app` (for example, `https://your-service.onrender.com/app`). In BotFather, configure the bot's Main Mini App URL to the same HTTPS `/app` address if you want an always-visible app button. API requests validate Telegram `initData`; opening the page directly outside Telegram does not reveal account data.
+
 ## Deployment configuration
 
 Set `BOT_TOKEN` and a strong, private `DASHBOARD_PASSWORD` in your host's environment settings. On Render, the bot stops at startup if the dashboard password is missing; local development generates a temporary password and prints it in the startup log. Optional settings: `ADMIN_CHAT_ID` (numeric Telegram chat ID), `TURSO_DATABASE_URL`, and `TURSO_AUTH_TOKEN`.

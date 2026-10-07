@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <meta name="theme-color" content="#f5f6fa"><title>Habit Garden</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="/webapp/style.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="top">
+      <div><div class="eyebrow" id="todayLabel">YOUR DAILY SPACE</div><h1 id="title">Habit Garden <span>✦</span></h1></div>
+      <button id="langBtn" class="lang">ខ្មែរ</button>
+    </header>
+    <section class="hero">
+      <div class="hero-copy"><span class="sun">☀️</span><p id="heroEyebrow">A little progress, every day</p><h2 id="heroTitle">Make today count.</h2><p id="heroSub">Small steps grow into strong habits.</p></div>
+      <div class="plant" aria-hidden="true"><span>🌱</span></div>
+    </section>
+    <section class="summary">
+      <div><span class="summary-icon">✅</span><div><strong id="doneCount">0/0</strong><small id="todayProgressLabel">today</small></div></div>
+      <div><span class="summary-icon">🔥</span><div><strong id="streakCount">0</strong><small id="streakLabel">best streak</small></div></div>
+    </section>
+    <div class="section-head"><div><p class="eyebrow" id="focusLabel">YOUR FOCUS</p><h2 id="habitsTitle">Daily habits</h2></div><button class="add" id="addBtn" aria-label="Add habit">＋</button></div>
+    <section id="taskList" class="task-list"><div class="loading"><span></span><span></span><span></span></div></section>
+    <section class="week-card"><div class="week-head"><div><p class="eyebrow" id="weekLabel">KEEP GROWING</p><h2 id="weekTitle">Weekly goals</h2></div><span class="week-icon">🎯</span></div><div id="goalList" class="goal-list"></div></section>
+    <footer id="footerText">One small win is still a win. 🌿</footer>
+  </main>
+  <div class="toast" id="toast" role="status"></div>
+  <script src="/webapp/app.js"></script>
+</body></html>
