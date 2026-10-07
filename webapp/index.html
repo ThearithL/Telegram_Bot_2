@@ -12,19 +12,40 @@
       <div><div class="eyebrow" id="todayLabel">YOUR DAILY SPACE</div><h1 id="title">My Daily Habits <span>✦</span></h1></div>
       <button id="langBtn" class="lang">ខ្មែរ</button>
     </header>
+    <section class="screen active" id="screen-today">
     <section class="hero">
       <div class="hero-copy"><span class="sun">☀️</span><p id="heroEyebrow">A little progress, every day</p><h2 id="heroTitle">Make today count.</h2><p id="heroSub">Small steps grow into strong habits.</p></div>
       <div class="plant" aria-hidden="true"><span>🌱</span></div>
     </section>
-    <section class="summary">
+    <section class="summary" data-screen="today">
       <div><span class="summary-icon">✅</span><div><strong id="doneCount">0/0</strong><small id="todayProgressLabel">today</small></div></div>
       <div><span class="summary-icon">🔥</span><div><strong id="streakCount">0</strong><small id="streakLabel">best streak</small></div></div>
     </section>
-    <div class="section-head"><div><p class="eyebrow" id="focusLabel">YOUR FOCUS</p><h2 id="habitsTitle">Daily habits</h2></div><button class="add" id="addBtn" aria-label="Add habit">＋</button></div>
-    <section id="taskList" class="task-list"><div class="loading"><span></span><span></span><span></span></div></section>
-    <section class="week-card"><div class="week-head"><div><p class="eyebrow" id="weekLabel">KEEP GROWING</p><h2 id="weekTitle">Weekly goals</h2></div><span class="week-icon">🎯</span></div><div id="goalList" class="goal-list"></div></section>
-    <footer id="footerText">One small win is still a win. 🌿</footer>
+      <div class="section-head"><div><p class="eyebrow" id="focusLabel">YOUR FOCUS</p><h2 id="habitsTitle">Daily habits</h2></div><button class="add" id="addBtn" aria-label="Add habit">＋</button></div>
+      <section id="taskList" class="task-list"><div class="loading"><span></span><span></span><span></span></div></section>
+      <footer id="footerText">One small win is still a win. 🌿</footer>
+    </section>
+    <section class="screen" id="screen-tasks">
+      <div class="section-head"><div><p class="eyebrow" id="tasksEyebrow">BUILD YOUR ROUTINE</p><h2 id="tasksHeading">All habits</h2></div><button class="add" id="addBtn2" aria-label="Add habit">＋</button></div>
+      <section id="allTaskList" class="task-list"></section>
+    </section>
+    <section class="screen" id="screen-goals">
+      <section class="week-card standalone"><div class="week-head"><div><p class="eyebrow" id="weekLabel">KEEP GROWING</p><h2 id="weekTitle">Weekly goals</h2></div><span class="week-icon">🎯</span></div><p id="goalHint" class="hint">Choose a goal for each habit, then track your progress over the last 7 days.</p><div id="goalList" class="goal-list"></div></section>
+    </section>
+    <section class="screen" id="screen-settings">
+      <div class="section-head"><div><p class="eyebrow" id="settingsEyebrow">PREFERENCES</p><h2 id="settingsHeading">Settings</h2></div></div>
+      <div class="setting-card"><div><strong id="languageName">Language</strong><small id="languageHint">Choose Khmer or English</small></div><button id="langSetting" class="setting-action">English</button></div>
+      <div class="setting-card"><div><strong id="reminderName">Reminders</strong><small id="reminderHint">Manage reminder times in the bot menu</small></div><span>⏰</span></div>
+      <section id="adminPanel" class="admin-panel" hidden><div class="section-head"><div><p class="eyebrow" id="adminEyebrow">ADMIN ONLY</p><h2 id="adminHeading">Admin tools</h2></div><span>🛡️</span></div><div class="admin-stats"><div><strong id="adminUsers">—</strong><small id="usersLabel">users</small></div><div><strong id="adminTasks">—</strong><small id="totalTasksLabel">tasks</small></div></div><div class="setting-card"><div><strong id="maintenanceName">Maintenance mode</strong><small id="maintenanceHint">Pause normal bot actions</small></div><button id="maintenanceToggle" class="setting-action">Off</button></div></section>
+    </section>
   </main>
+  <nav class="bottom-nav" aria-label="Main navigation">
+    <button class="nav-item active" data-tab="today"><span>☀️</span><small id="navToday">Today</small></button>
+    <button class="nav-item" data-tab="tasks"><span>☑️</span><small id="navTasks">Tasks</small></button>
+    <button class="nav-item" data-tab="goals"><span>🎯</span><small id="navGoals">Goals</small></button>
+    <button class="nav-item" data-tab="settings"><span>⚙️</span><small id="navSettings">Settings</small></button>
+  </nav>
+  <div id="editDialog" class="dialog-backdrop" hidden><section class="dialog"><h2 id="dialogTitle">Edit habit</h2><input id="editInput" maxlength="80"><div class="dialog-actions"><button id="deleteBtn" class="delete-action">Delete</button><span></span><button id="cancelEdit" class="cancel-action">Cancel</button><button id="saveEdit" class="save-action">Save</button></div></section></div>
   <div class="toast" id="toast" role="status"></div>
   <script src="/webapp/app.js"></script>
 </body></html>

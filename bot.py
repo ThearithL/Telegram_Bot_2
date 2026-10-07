@@ -409,6 +409,13 @@ def init_db():
             done INTEGER
         )
     """)
+    # Keep one authoritative completion state per task and local calendar day.
+    c.execute("""
+        DELETE FROM logs WHERE id NOT IN (
+            SELECT MAX(id) FROM logs GROUP BY task_id, date
+        )
+    """)
+    c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_logs_task_date ON logs(task_id, date)")
     c.execute("""
         CREATE TABLE IF NOT EXISTS reminder_times (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -508,6 +515,28 @@ def today_str():
 
 def yesterday_str():
     return (datetime.now(TZ) - timedelta(days=1)).strftime("%Y-%m-%d")
+
+
+def calculate_current_streak(conn, task_id, reference_date=None):
+    """Compute streak from the log table, the source of truth.
+
+    A streak remains current through today if the last completion was
+    yesterday; a missing or false daily record ends it.
+    """
+    today = reference_date or datetime.now(TZ).date()
+    today_log = conn.execute(
+        "SELECT done FROM logs WHERE task_id=? AND date=?", (task_id, today.isoformat())
+    ).fetchone()
+    cursor = today if today_log and today_log["done"] else today - timedelta(days=1)
+    streak = 0
+    while True:
+        row = conn.execute(
+            "SELECT done FROM logs WHERE task_id=? AND date=?", (task_id, cursor.isoformat())
+        ).fetchone()
+        if not row or not row["done"]:
+            return streak
+        streak += 1
+        cursor -= timedelta(days=1)
 
 
 # ------------------------------------------------------------------
@@ -706,11 +735,12 @@ def _weekly_goals_text(chat_id, lang):
         conn.close()
         return t(lang, "goals_empty")
     cutoff = (datetime.now(TZ).date() - timedelta(days=6)).strftime("%Y-%m-%d")
+    end_date = today_str()
     lines = [t(lang, "goals_header")]
     for task in tasks:
         row = conn.execute(
-            "SELECT COUNT(*) c FROM logs WHERE task_id=? AND date>=? AND done=1",
-            (task["id"], cutoff),
+            "SELECT COUNT(*) c FROM logs WHERE task_id=? AND date BETWEEN ? AND ? AND done=1",
+            (task["id"], cutoff, end_date),
         ).fetchone()
         done = row["c"]
         target = max(1, min(7, int(task["weekly_goal"] or 7)))
@@ -923,12 +953,17 @@ def _stats_text(chat_id, lang):
         conn.close()
         return t(lang, "stats_empty")
 
-    cutoff = (datetime.now(TZ) - timedelta(days=7)).strftime("%Y-%m-%d")
+    end_date = datetime.now(TZ).date()
+    cutoff = (end_date - timedelta(days=6)).isoformat()
+    end_date_text = end_date.isoformat()
     lines = [t(lang, "stats_header")]
     for row in tasks:
-        logs = conn.execute("SELECT done FROM logs WHERE task_id=? AND date>=?", (row["id"], cutoff)).fetchall()
+        logs = conn.execute(
+            "SELECT done FROM logs WHERE task_id=? AND date BETWEEN ? AND ?",
+            (row["id"], cutoff, end_date_text),
+        ).fetchall()
         done_count = sum(1 for l in logs if l["done"])
-        total = len(logs) if logs else 0
+        total = 7
         pct = f"{(done_count/total*100):.0f}%" if total else "n/a"
         lines.append(t(lang, "stats_line", name=row["name"], done=done_count, total=total, pct=pct))
     conn.close()
@@ -1042,13 +1077,26 @@ def _apply_checkin_for_task(conn, lang, task_id, done, date):
 
     badge_lines = []
     if done:
-        if task_row["last_done_date"] == date:
-            # Already checked in today (e.g. a second reminder time firing
-            # the same day, or re-tapping quick-toggle) — keep the streak
-            # as-is instead of recomputing it.
-            new_streak = task_row["streak"]
-        elif task_row["last_done_date"] == yesterday_str():
-            new_streak = task_row["streak"] + 1
+        previous = conn.execute(
+            "SELECT date FROM logs WHERE task_id=? AND done=1 AND date<? ORDER BY date DESC LIMIT 1",
+            (task_id, date),
+        ).fetchone()
+        previous_date = previous["date"] if previous else None
+        if previous_date == (datetime.strptime(date, "%Y-%m-%d").date() - timedelta(days=1)).isoformat():
+            # Rebuild from the stored consecutive completion history, rather
+            # than trusting a stale cached streak field.
+            new_streak = 1
+            cursor_date = datetime.strptime(date, "%Y-%m-%d").date() - timedelta(days=1)
+            while True:
+                prior = conn.execute(
+                    "SELECT done FROM logs WHERE task_id=? AND date=?", (task_id, cursor_date.isoformat())
+                ).fetchone()
+                if not prior or not prior["done"]:
+                    break
+                new_streak += 1
+                cursor_date -= timedelta(days=1)
+        elif task_row["last_done_date"] == date:
+            new_streak = max(1, task_row["streak"])
         else:
             new_streak = 1
         best = max(new_streak, task_row["best_streak"])
@@ -1581,12 +1629,14 @@ def _dashboard_stats():
     checkins_today = conn.execute(
         "SELECT COUNT(*) c FROM logs WHERE date=? AND done=1", (today_str(),)
     ).fetchone()["c"]
-    week_cutoff = (datetime.now(TZ) - timedelta(days=7)).strftime("%Y-%m-%d")
+    week_cutoff = (datetime.now(TZ).date() - timedelta(days=6)).strftime("%Y-%m-%d")
     checkins_week = conn.execute(
-        "SELECT COUNT(*) c FROM logs WHERE date>=? AND done=1", (week_cutoff,)
+        "SELECT COUNT(*) c FROM logs WHERE date BETWEEN ? AND ? AND done=1", (week_cutoff, today_str())
     ).fetchone()["c"]
+    possible_week = tasks * 7
     conn.close()
-    return {"users": users, "tasks": tasks, "checkins_today": checkins_today, "checkins_week": checkins_week}
+    return {"users": users, "tasks": tasks, "checkins_today": checkins_today,
+            "checkins_week": checkins_week, "possible_week": possible_week}
 
 
 def _top_streaks(limit=10):
@@ -1693,10 +1743,12 @@ def mini_app_data():
             "SELECT COUNT(*) c FROM logs WHERE task_id=? AND date>=? AND done=1", (task["id"], cutoff)
         ).fetchone()["c"]
         result.append({"id": task["id"], "name": task["name"], "done": bool(log and log["done"]),
-                       "streak": task["streak"], "best": task["best_streak"],
+                       "streak": calculate_current_streak(conn, task["id"]), "best": task["best_streak"],
                        "goal": task["weekly_goal"] or 7, "week_done": count})
     conn.close()
-    return jsonify({"language": lang, "date": today, "tasks": result})
+    return jsonify({"language": lang, "date": today, "tasks": result,
+                    "is_admin": is_admin(chat_id),
+                    "maintenance": is_maintenance_on() if is_admin(chat_id) else None})
 
 
 @flask_app.route("/api/miniapp/task", methods=["POST"])
@@ -1713,6 +1765,75 @@ def mini_app_task():
     if not ok:
         return jsonify({"error": message}), 409
     return jsonify({"ok": True})
+
+
+@flask_app.route("/api/miniapp/task/<int:task_id>", methods=["PATCH", "DELETE"])
+def mini_app_edit_task(task_id):
+    chat_id = _mini_app_user()
+    if not chat_id:
+        return jsonify({"error": "Unauthorized"}), 401
+    conn = get_conn()
+    task = conn.execute("SELECT id FROM tasks WHERE id=? AND chat_id=?", (task_id, chat_id)).fetchone()
+    if not task:
+        conn.close()
+        return jsonify({"error": "Task not found."}), 404
+    if request.method == "DELETE":
+        conn.execute("DELETE FROM logs WHERE task_id=?", (task_id,))
+        conn.execute("DELETE FROM tasks WHERE id=? AND chat_id=?", (task_id, chat_id))
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True})
+    name = str((request.get_json(silent=True) or {}).get("name", "")).strip()
+    if not name or len(name) > 80:
+        conn.close()
+        return jsonify({"error": "Task name must be 1–80 characters."}), 400
+    duplicate = conn.execute("SELECT id FROM tasks WHERE chat_id=? AND lower(name)=lower(?) AND id<>?", (chat_id, name, task_id)).fetchone()
+    if duplicate:
+        conn.close()
+        return jsonify({"error": "A task with that name already exists."}), 409
+    conn.execute("UPDATE tasks SET name=? WHERE id=? AND chat_id=?", (name, task_id, chat_id))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+@flask_app.route("/api/miniapp/goal/<int:task_id>", methods=["POST"])
+def mini_app_set_goal(task_id):
+    chat_id = _mini_app_user()
+    if not chat_id:
+        return jsonify({"error": "Unauthorized"}), 401
+    try:
+        goal = int((request.get_json(silent=True) or {}).get("goal"))
+    except (ValueError, TypeError):
+        return jsonify({"error": "Choose a goal from 1 to 7."}), 400
+    if not 1 <= goal <= 7:
+        return jsonify({"error": "Choose a goal from 1 to 7."}), 400
+    conn = get_conn()
+    task = conn.execute("SELECT id FROM tasks WHERE id=? AND chat_id=?", (task_id, chat_id)).fetchone()
+    if not task:
+        conn.close()
+        return jsonify({"error": "Task not found."}), 404
+    conn.execute("UPDATE tasks SET weekly_goal=? WHERE id=? AND chat_id=?", (goal, task_id, chat_id))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+@flask_app.route("/api/miniapp/admin", methods=["GET", "POST"])
+def mini_app_admin():
+    chat_id = _mini_app_user()
+    if not chat_id or not is_admin(chat_id):
+        return jsonify({"error": "Admin access only."}), 403
+    if request.method == "POST":
+        mode = (request.get_json(silent=True) or {}).get("maintenance")
+        if not isinstance(mode, bool):
+            return jsonify({"error": "Invalid setting."}), 400
+        set_setting("maintenance_mode", "true" if mode else "false")
+    conn = get_conn()
+    users = conn.execute("SELECT COUNT(*) c FROM users").fetchone()["c"]
+    task_count = conn.execute("SELECT COUNT(*) c FROM tasks").fetchone()["c"]
+    conn.close()
+    return jsonify({"users": users, "tasks": task_count, "maintenance": is_maintenance_on()})
 
 
 @flask_app.route("/api/miniapp/toggle", methods=["POST"])
@@ -1779,7 +1900,7 @@ def logout():
     return redirect(url_for("login"))
 
 
-@flask_app.route("/")
+@flask_app.route("/admin")
 @_require_login
 def dashboard():
     return render_template_string(
@@ -1794,6 +1915,11 @@ def dashboard():
         checkin_series_json=json.dumps(_daily_checkin_series()),
         lang_breakdown_json=json.dumps(_language_breakdown()),
     )
+
+
+@flask_app.route("/")
+def home():
+    return redirect(url_for("mini_app"))
 
 
 @flask_app.route("/toggle-maintenance", methods=["POST"])

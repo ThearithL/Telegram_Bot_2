@@ -18,9 +18,11 @@ Besides typing commands, you now get two menus:
 
 ## Telegram Mini App
 
-The project includes a bilingual Mini App at `/app`. It shows today's habits, tap-to-check-in controls, streaks, and weekly-goal progress, with a button to add a habit. The Telegram `/start` message includes an **Open Mini App** button when a public HTTPS URL is configured.
+The project includes a bilingual Mini App at `/app` (the service root `/` redirects there). It has Today, Tasks, Goals, and Settings tabs, supports add/check/edit/delete, weekly-goal editing, and shows streaks and progress. Admin-only tools appear in Settings for the configured `ADMIN_CHAT_ID`. The old password-protected web dashboard is now at `/admin`.
 
-For Render, set `RENDER_EXTERNAL_URL` automatically if available; otherwise set `MINI_APP_URL` to your public address ending in `/app` (for example, `https://your-service.onrender.com/app`). In BotFather, configure the bot's Main Mini App URL to the same HTTPS `/app` address if you want an always-visible app button. API requests validate Telegram `initData`; opening the page directly outside Telegram does not reveal account data.
+For Render, set `RENDER_EXTERNAL_URL` automatically if available; otherwise set `MINI_APP_URL` to your public address ending in `/app` (for example, `https://your-service.onrender.com/app`). Configure BotFather's Main Mini App URL to the same HTTPS `/app` address. Mini App API requests validate Telegram `initData` and scope task operations to the verified user.
+
+Check-in history now enforces one row per task per local date. Existing duplicate rows are cleaned at startup by keeping the latest row, and streak displays are recalculated from the daily logs. Weekly reports consistently use today plus the previous six Cambodia dates; unlogged days count as incomplete in completion rates.
 
 ## Deployment configuration
 
