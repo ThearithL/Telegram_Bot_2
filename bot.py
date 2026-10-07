@@ -59,9 +59,12 @@ except ImportError:
 # ------------------------------------------------------------------
 # CONFIG
 # ------------------------------------------------------------------
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "PUT_YOUR_TOKEN_HERE")
-ADMIN_CHAT_ID = int(os.environ.get("ADMIN_CHAT_ID", "0"))  # your own Telegram chat_id (for /maintenance)
-DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "changeme")  # web dashboard login
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "").strip()
+try:
+    ADMIN_CHAT_ID = int(os.environ.get("ADMIN_CHAT_ID", "0"))  # your own Telegram chat_id (for /maintenance)
+except ValueError as exc:
+    raise RuntimeError("ADMIN_CHAT_ID must be a numeric Telegram chat ID.") from exc
+DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "").strip()  # web dashboard login
 FLASK_SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(32))
 TIMEZONE_OFFSET_HOURS = 7  # Asia/Phnom_Penh (UTC+7), no DST
 TZ = timezone(timedelta(hours=TIMEZONE_OFFSET_HOURS))
@@ -150,6 +153,8 @@ TEXT = {
             "/addtask <ឈ្មោះ> - បន្ថែម task ថ្មី\n"
             "/removetask <ឈ្មោះ> - លុប task\n"
             "/mytasks - មើលបញ្ជី task\n"
+            "/goal <ឈ្មោះ> <1-7> - កំណត់គោលដៅប្រចាំសប្តាហ៍\n"
+            "/goals - មើលវឌ្ឍនភាពគោលដៅ\n"
             "/addtime HH:MM - បន្ថែមម៉ោងជូនដំណឹង (អាចមានច្រើន)\n"
             "/removetime HH:MM - លុបម៉ោងជូនដំណឹង\n"
             "/mytimes - មើលម៉ោងជូនដំណឹងទាំងអស់\n"
@@ -165,6 +170,8 @@ TEXT = {
             "/addtask <name> - add a task\n"
             "/removetask <name> - remove a task\n"
             "/mytasks - list your tasks\n"
+            "/goal <name> <1-7> - set a weekly target\n"
+            "/goals - view weekly goal progress\n"
             "/addtime HH:MM - add a reminder time (you can have several)\n"
             "/removetime HH:MM - remove a reminder time\n"
             "/mytimes - list all your reminder times\n"
@@ -184,6 +191,12 @@ TEXT = {
     "mytasks_empty": {"km": "អ្នកមិនទាន់មាន task ទេ។ ប្រើ /addtask <ឈ្មោះ>", "en": "You have no tasks yet. Add one with /addtask <name>"},
     "mytasks_header": {"km": "📋 Task ប្រចាំថ្ងៃរបស់អ្នក:\n", "en": "📋 Your daily tasks:\n"},
     "mytasks_line": {"km": "• {name}  (streak: {streak} 🔥, ល្អបំផុត: {best})", "en": "• {name}  (streak: {streak} 🔥, best: {best})"},
+    "goal_usage": {"km": "របៀបប្រើ៖ /goal <ឈ្មោះ task> <1-7> (ឧ. /goal អានសៀវភៅ 5)", "en": "Usage: /goal <task name> <1-7> (e.g. /goal Read a book 5)"},
+    "goal_set": {"km": "🎯 បានកំណត់គោលដៅ '{name}' ចំនួន {target} ដងក្នុងមួយសប្តាហ៍។", "en": "🎯 Set '{name}' goal to {target} completions per week."},
+    "goal_notfound": {"km": "រកមិនឃើញ task '{name}' ទេ។", "en": "No task found named '{name}'."},
+    "goals_empty": {"km": "អ្នកមិនទាន់មាន task ទេ។ ប្រើ /addtask <ឈ្មោះ>", "en": "You have no tasks yet. Add one with /addtask <name>"},
+    "goals_header": {"km": "🎯 គោលដៅប្រចាំសប្តាហ៍ (7 ថ្ងៃចុងក្រោយ):\n", "en": "🎯 Weekly goals (last 7 days):\n"},
+    "goal_line": {"km": "• {name}: {done}/{target} ដង {bar}", "en": "• {name}: {done}/{target} times {bar}"},
     "addtime_usage": {"km": "របៀបប្រើ: /addtime HH:MM (ឧ. /addtime 07:30)", "en": "Usage: /addtime HH:MM (e.g. /addtime 07:30)"},
     "addtime_invalid": {"km": "⚠️ ម៉ោងមិនត្រឹមត្រូវ។ ប្រើទម្រង់ 24h ដូចជា 21:30", "en": "⚠️ Invalid time. Use 24h format like 21:30."},
     "addtime_exists": {"km": "⚠️ អ្នកមានម៉ោង {hour:02d}:{minute:02d} រួចហើយ។", "en": "⚠️ You already have {hour:02d}:{minute:02d} set."},
@@ -374,12 +387,15 @@ def init_db():
             name TEXT,
             streak INTEGER DEFAULT 0,
             best_streak INTEGER DEFAULT 0,
-            last_done_date TEXT
+            last_done_date TEXT,
+            weekly_goal INTEGER DEFAULT 7
         )
     """)
     task_cols = [row["name"] for row in c.execute("PRAGMA table_info(tasks)").fetchall()]
     if "last_badge" not in task_cols:
         c.execute("ALTER TABLE tasks ADD COLUMN last_badge INTEGER DEFAULT 0")
+    if "weekly_goal" not in task_cols:
+        c.execute("ALTER TABLE tasks ADD COLUMN weekly_goal INTEGER DEFAULT 7")
 
     c.execute("""
         CREATE TABLE IF NOT EXISTS logs (
@@ -554,6 +570,7 @@ def build_menu_keyboard(lang):
             InlineKeyboardButton(t(lang, "menu_btn_stats"), callback_data="menu:stats"),
             InlineKeyboardButton(t(lang, "menu_btn_checkin"), callback_data="menu:checkin"),
         ],
+        [InlineKeyboardButton("🎯 " + ("គោលដៅ" if lang == "km" else "Weekly Goals"), callback_data="menu:goals")],
         [
             InlineKeyboardButton(t(lang, "menu_btn_export"), callback_data="menu:export"),
             InlineKeyboardButton(t(lang, "menu_btn_language"), callback_data="menu:language"),
@@ -670,6 +687,63 @@ def _mytasks_text(chat_id, lang):
     for row in tasks:
         lines.append(t(lang, "mytasks_line", name=row["name"], streak=row["streak"], best=row["best_streak"]))
     return "\n".join(lines)
+
+
+def _weekly_goals_text(chat_id, lang):
+    conn = get_conn()
+    tasks = conn.execute("SELECT id, name, weekly_goal FROM tasks WHERE chat_id=? ORDER BY name", (chat_id,)).fetchall()
+    if not tasks:
+        conn.close()
+        return t(lang, "goals_empty")
+    cutoff = (datetime.now(TZ).date() - timedelta(days=6)).strftime("%Y-%m-%d")
+    lines = [t(lang, "goals_header")]
+    for task in tasks:
+        row = conn.execute(
+            "SELECT COUNT(*) c FROM logs WHERE task_id=? AND date>=? AND done=1",
+            (task["id"], cutoff),
+        ).fetchone()
+        done = row["c"]
+        target = max(1, min(7, int(task["weekly_goal"] or 7)))
+        filled = min(10, round(min(done, target) / target * 10))
+        bar = "▰" * filled + "▱" * (10 - filled)
+        lines.append(t(lang, "goal_line", name=task["name"], done=done, target=target, bar=bar))
+    conn.close()
+    return "\n".join(lines)
+
+
+@maintenance_guard
+async def set_goal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    lang = get_user_language(chat_id)
+    if len(context.args) < 2:
+        await update.message.reply_text(t(lang, "goal_usage"))
+        return
+    try:
+        target = int(context.args[-1])
+    except ValueError:
+        await update.message.reply_text(t(lang, "goal_usage"))
+        return
+    if not 1 <= target <= 7:
+        await update.message.reply_text(t(lang, "goal_usage"))
+        return
+    name = " ".join(context.args[:-1]).strip()
+    conn = get_conn()
+    task = conn.execute("SELECT id FROM tasks WHERE chat_id=? AND lower(name)=lower(?)", (chat_id, name)).fetchone()
+    if task:
+        conn.execute("UPDATE tasks SET weekly_goal=? WHERE id=?", (target, task["id"]))
+        conn.commit()
+    conn.close()
+    if not task:
+        await update.message.reply_text(t(lang, "goal_notfound", name=name))
+        return
+    await update.message.reply_text(t(lang, "goal_set", name=name, target=target), reply_markup=back_to_menu_keyboard(lang))
+
+
+@maintenance_guard
+async def goals_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    lang = get_user_language(chat_id)
+    await update.message.reply_text(_weekly_goals_text(chat_id, lang), reply_markup=back_to_menu_keyboard(lang))
 
 
 def empty_tasks_keyboard(lang):
@@ -1130,6 +1204,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=chat_id, text=_mytimes_text(chat_id, lang), reply_markup=kb)
         elif action == "stats":
             await context.bot.send_message(chat_id=chat_id, text=_stats_text(chat_id, lang), reply_markup=back_to_menu_keyboard(lang))
+        elif action == "goals":
+            await context.bot.send_message(chat_id=chat_id, text=_weekly_goals_text(chat_id, lang), reply_markup=back_to_menu_keyboard(lang))
         elif action == "checkin":
             await send_checkin(chat_id, context)
         elif action == "export":
@@ -1618,6 +1694,8 @@ BOT_COMMANDS_EN = [
     BotCommand("addtask", "Add a daily task"),
     BotCommand("removetask", "Remove a task"),
     BotCommand("mytasks", "List your tasks and streaks"),
+    BotCommand("goal", "Set a weekly completion goal"),
+    BotCommand("goals", "View weekly goal progress"),
     BotCommand("addtime", "Add a daily reminder time"),
     BotCommand("removetime", "Remove a reminder time"),
     BotCommand("mytimes", "List your reminder times"),
@@ -1634,6 +1712,8 @@ BOT_COMMANDS_KM = [
     BotCommand("addtask", "បន្ថែម task ប្រចាំថ្ងៃ"),
     BotCommand("removetask", "លុប task"),
     BotCommand("mytasks", "មើលបញ្ជី task និង streak"),
+    BotCommand("goal", "កំណត់គោលដៅប្រចាំសប្តាហ៍"),
+    BotCommand("goals", "មើលវឌ្ឍនភាពគោលដៅ"),
     BotCommand("addtime", "បន្ថែមម៉ោងជូនដំណឹង"),
     BotCommand("removetime", "លុបម៉ោងជូនដំណឹង"),
     BotCommand("mytimes", "មើលម៉ោងជូនដំណឹងទាំងអស់"),
@@ -1676,15 +1756,17 @@ async def error_handler(update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def main():
-    if BOT_TOKEN == "PUT_YOUR_TOKEN_HERE":
-        env_keys = sorted(os.environ.keys())
-        logger.error("BOT_TOKEN not found. Available env var keys: %s", env_keys)
+    if not BOT_TOKEN:
+        logger.error("BOT_TOKEN is not configured.")
         raise RuntimeError("Set the BOT_TOKEN environment variable before running.")
 
     init_db()
 
-    if DASHBOARD_PASSWORD == "changeme":
-        logger.warning("DASHBOARD_PASSWORD is not set — using the default 'changeme'. Set it in your environment!")
+    if not DASHBOARD_PASSWORD:
+        if os.environ.get("RENDER"):
+            raise RuntimeError("Set a strong DASHBOARD_PASSWORD environment variable before deploying.")
+        DASHBOARD_PASSWORD = secrets.token_urlsafe(24)
+        logger.warning("DASHBOARD_PASSWORD was not set. Temporary dashboard password: %s", DASHBOARD_PASSWORD)
 
     threading.Thread(target=run_dashboard, daemon=True).start()
 
@@ -1696,6 +1778,8 @@ def main():
     application.add_handler(CommandHandler("addtask", add_task))
     application.add_handler(CommandHandler("removetask", remove_task))
     application.add_handler(CommandHandler("mytasks", my_tasks))
+    application.add_handler(CommandHandler("goal", set_goal))
+    application.add_handler(CommandHandler("goals", goals_command))
     application.add_handler(CommandHandler("addtime", add_time))
     application.add_handler(CommandHandler("removetime", remove_time))
     application.add_handler(CommandHandler("mytimes", my_times))

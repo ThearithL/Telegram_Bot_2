@@ -10,6 +10,16 @@ Besides typing commands, you now get two menus:
   `/removetime`) show the usage line instead, since Telegram buttons
   can't pre-fill your message box.
 
+## Weekly goals
+
+- `/goal <task name> <1-7>` sets how many days per week you want to complete a task. For example: `/goal Read a book 5`.
+- `/goals` shows each task's completions during the last 7 days and a progress bar. The same report is available from **Weekly Goals** in `/menu`.
+- Existing tasks default to a target of 7. Startup adds the database column automatically, preserving existing local or Turso data.
+
+## Deployment configuration
+
+Set `BOT_TOKEN` and a strong, private `DASHBOARD_PASSWORD` in your host's environment settings. On Render, the bot stops at startup if the dashboard password is missing; local development generates a temporary password and prints it in the startup log. Optional settings: `ADMIN_CHAT_ID` (numeric Telegram chat ID), `TURSO_DATABASE_URL`, and `TURSO_AUTH_TOKEN`.
+
 ## Changelog
 
 - **Improved:** the `/menu` button grid is now fully tap-driven — no more
@@ -47,3 +57,8 @@ Besides typing commands, you now get two menus:
 - **Fixed:** `.python-version` was empty; pinned to `3.11`.
 - **Added:** an in-chat button menu (`/menu`, also shown after `/start`)
   and Telegram's native "☰" commands menu — see **Button menu** above.
+- **Added:** customizable weekly completion goals with bilingual commands,
+  menu access, progress bars, and automatic schema migration.
+- **Fixed:** startup no longer logs environment variable names; `ADMIN_CHAT_ID`
+  is validated, and Render requires an explicit dashboard password instead of
+  silently using the publicly known `changeme` default.
