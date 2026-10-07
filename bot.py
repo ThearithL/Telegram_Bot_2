@@ -603,26 +603,38 @@ def build_menu_keyboard(lang):
     rows = [
         [
             InlineKeyboardButton(t(lang, "menu_btn_mytasks"), callback_data="menu:mytasks"),
-            InlineKeyboardButton(t(lang, "menu_btn_mytimes"), callback_data="menu:mytimes"),
+            InlineKeyboardButton(t(lang, "menu_btn_checkin"), callback_data="menu:checkin"),
         ],
         [
             InlineKeyboardButton(t(lang, "menu_btn_stats"), callback_data="menu:stats"),
-            InlineKeyboardButton(t(lang, "menu_btn_checkin"), callback_data="menu:checkin"),
-        ],
-        [InlineKeyboardButton("🎯 " + ("គោលដៅ" if lang == "km" else "Weekly Goals"), callback_data="menu:goals")],
-        [
-            InlineKeyboardButton(t(lang, "menu_btn_export"), callback_data="menu:export"),
-            InlineKeyboardButton(t(lang, "menu_btn_language"), callback_data="menu:language"),
+            InlineKeyboardButton("🎯 " + ("គោលដៅ" if lang == "km" else "Weekly Goals"), callback_data="menu:goals"),
         ],
         [
             InlineKeyboardButton(t(lang, "menu_btn_addtask"), callback_data="menu:addtask"),
             InlineKeyboardButton(t(lang, "menu_btn_removetask"), callback_data="menu:removetask"),
         ],
         [
+            InlineKeyboardButton("⋯ " + ("បន្ថែម" if lang == "km" else "More"), callback_data="menu:more"),
+        ],
+    ]
+    return InlineKeyboardMarkup(rows)
+
+
+def build_more_menu_keyboard(lang):
+    rows = [
+        [
+            InlineKeyboardButton(t(lang, "menu_btn_mytimes"), callback_data="menu:mytimes"),
+            InlineKeyboardButton(t(lang, "menu_btn_export"), callback_data="menu:export"),
+        ],
+        [
             InlineKeyboardButton(t(lang, "menu_btn_addtime"), callback_data="menu:addtime"),
             InlineKeyboardButton(t(lang, "menu_btn_removetime"), callback_data="menu:removetime"),
         ],
-        [InlineKeyboardButton(t(lang, "menu_btn_help"), callback_data="menu:help")],
+        [
+            InlineKeyboardButton(t(lang, "menu_btn_language"), callback_data="menu:language"),
+            InlineKeyboardButton(t(lang, "menu_btn_help"), callback_data="menu:help"),
+        ],
+        [InlineKeyboardButton(t(lang, "menu_btn_back"), callback_data="menu:show")],
     ]
     return InlineKeyboardMarkup(rows)
 
@@ -1245,6 +1257,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if action == "show":
             awaiting_input.pop(chat_id, None)
             await context.bot.send_message(chat_id=chat_id, text=t(lang, "menu_title"), reply_markup=build_menu_keyboard(lang))
+        elif action == "more":
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="⋯ " + ("ម៉ឺនុយបន្ថែម៖" if lang == "km" else "More options:"),
+                reply_markup=build_more_menu_keyboard(lang),
+            )
         elif action == "mytasks":
             conn = get_conn()
             has_tasks = conn.execute("SELECT id FROM tasks WHERE chat_id=?", (chat_id,)).fetchone()
