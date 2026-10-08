@@ -1756,7 +1756,6 @@ async def error_handler(update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def main():
-    global DASHBOARD_PASSWORD
     if not BOT_TOKEN:
         logger.error("BOT_TOKEN is not configured.")
         raise RuntimeError("Set the BOT_TOKEN environment variable before running.")
