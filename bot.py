@@ -1744,7 +1744,7 @@ def _mini_app_user():
             return None
         # Telegram defines secret_key = HMAC_SHA256(bot_token, "WebAppData").
         # The previous argument order was reversed and rejected every valid app request.
-        secret = hmac.new(BOT_TOKEN.encode(), b"WebAppData", hashlib.sha256).digest()
+        secret = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
         data_check = "\n".join(f"{key}={value}" for key, value in sorted(parsed.items()))
         expected = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(received_hash, expected):
