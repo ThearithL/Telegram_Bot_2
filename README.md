@@ -22,7 +22,7 @@ The project includes a bilingual Mini App at `/app` (the service root `/` redire
 
 The Mini App opens on a dedicated **Home** menu with welcome copy, today's completion and streak summaries, and direct cards for Today, Habits, Goals, Stats, Reminders, Export, Khmer Calendar, Settings, and Help. All menu and tab labels are available in English and Khmer.
 
-The **More** tab also includes one-tap habit ideas (water, reading, walking, stretching, sleep, and meditation). The bot's `/menu` and `/start` button menus include an **Open Mini App** button, and the bot's **More** menu opens the Mini App directly on its More tab. In Settings, users can switch between Fullscreen and Windowed; Fullscreen is the default and the choice is remembered on that device. Telegram versions or devices without fullscreen support use the expanded view instead.
+The **More** tab also includes one-tap habit ideas (water, reading, walking, stretching, sleep, and meditation) plus a weekly completion snapshot with the average completion rate and strongest day. A Back to Home button and Telegram's native back button return users to the Home screen. The bot's `/menu` and `/start` button menus include an **Open Mini App** button, and the bot's **More** menu opens the Mini App directly on its More tab. In Settings, users can switch between Fullscreen and Windowed; Fullscreen is the default and the choice is remembered on that device. Telegram versions or devices without fullscreen support use the expanded view instead.
 
 The Telegram chat menu keeps frequent actions on its main screen and groups reminder times, Excel export, language, and help under **More**.
 
@@ -42,6 +42,8 @@ Set `BOT_TOKEN` and a strong, private `DASHBOARD_PASSWORD` in your host's enviro
   default and expanded-view fallback on unsupported Telegram clients.
 - **Improved:** the screen-size setting follows changes made from Telegram's
   own fullscreen controls.
+- **Added:** an in-app Back to Home button and Telegram native Back button
+  behavior, plus a weekly insight card in More.
 
 - **Improved:** Mini App navigation and mobile layout, with clearer Home, Today,
   Habits, and More sections, a weekly progress chart, reminder management,

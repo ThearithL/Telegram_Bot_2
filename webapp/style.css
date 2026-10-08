@@ -22,6 +22,9 @@ button { cursor: pointer; -webkit-tap-highlight-color: transparent; }
 button:focus-visible, input:focus-visible { outline: 3px solid #7ab18d; outline-offset: 2px; }
 .shell { width: min(100%, 560px); min-height: 100vh; margin: 0 auto; padding: 22px 18px 28px; }
 .top { display:flex; align-items:center; justify-content:space-between; gap:12px; margin: 5px 2px 19px; }
+.top-actions { display:flex; align-items:center; gap:7px; }
+.home-back { display:grid; width:38px; height:38px; place-items:center; border:1px solid var(--line); border-radius:12px; background:var(--card); color:var(--green-dark); font-size:20px; font-weight:700; box-shadow:var(--shadow); }
+.home-back[hidden] { display:none; }
 .eyebrow { margin:0 0 6px; color:var(--muted); font-size:10px; font-weight:800; letter-spacing:1.25px; }
 .top h1 { margin:0; font-size:22px; line-height:1.25; font-weight:800; letter-spacing:-.6px; }
 .top h1 span { color:var(--gold); font-size:16px; }
@@ -159,6 +162,11 @@ footer { padding:17px 0 4px; color:#8b978e; font-size:10px; text-align:center; }
 .template-card strong { font-size:10px; line-height:1.35; }
 .template-card i { display:grid; width:19px; height:19px; place-items:center; border-radius:7px; background:var(--green-soft); color:var(--green-dark); font-size:14px; font-style:normal; font-weight:800; }
 .template-card:disabled { opacity:.55; }
+.insight-card { margin-bottom:12px; background:linear-gradient(135deg,#fff 0%,#f1f7ee 100%); }
+.insight-summary { display:flex; align-items:baseline; gap:9px; margin-top:15px; }
+.insight-summary strong { color:var(--green-dark); font-size:30px; line-height:1; letter-spacing:-1px; }
+.insight-summary span { color:var(--muted); font-size:11px; font-weight:700; }
+.insight-best { min-height:17px; }
 .setting-card #screenSizeToggle { min-width:92px; }
 .help-list { display:grid; gap:9px; }
 .help-list article { display:flex; align-items:flex-start; gap:12px; padding:14px; border:1px solid var(--line); border-radius:15px; background:var(--card); box-shadow:var(--shadow); }

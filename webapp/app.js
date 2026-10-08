@@ -6,18 +6,18 @@
 
   const copy = {
     en: {
-      screenSize:'Screen size',screenHint:'Fullscreen is the default. Switch to windowed mode whenever you want.',fullscreen:'Fullscreen',windowed:'Windowed',fullscreenUnsupported:'Fullscreen is not supported on this Telegram version or device.',
+      screenSize:'Screen size',screenHint:'Fullscreen is the default. Switch to windowed mode whenever you want.',fullscreen:'Fullscreen',windowed:'Windowed',fullscreenUnsupported:'Fullscreen is not supported on this Telegram version or device.',backHome:'Back to Home',
       space:'YOUR DAILY SPACE',welcome:'Welcome back.',welcomeSub:'Small steps make strong routines.',menu:'Choose an option',today:'Today',todaySub:"Check off today's habits",habits:'My habits',habitsSub:'View and edit habits',goals:'Weekly goals',goalsSub:'Track your progress',stats:'Stats',statsSub:'Your last 7 days',reminders:'Reminders',remindersSub:'Manage reminder times',export:'Export data',exportSub:'Download your history',calendar:'Khmer Calendar',calendarSub:'Open the calendar source',settings:'Settings',settingsSub:'Language and preferences',help:'Help',helpSub:'How to use the app',add:'Add a habit',
       eyebrow:'A little progress, every day',heroTitle:'Make today count.',heroSub:'Small steps grow into strong habits.',focus:'YOUR FOCUS',dailyHabits:"Today's habits",todayLabel:'today',best:'best streak',footer:'One small win is still a win. 🌿',empty:'No habits yet. Add your first one to get started.',edit:'Edit habit',habitName:'Habit name',added:'Habit added 🌱',done:'Nice work! Keep it growing 🌱',updated:'Saved successfully.',deleted:'Habit deleted.',save:'Save habit',addAction:'Add habit',cancel:'Cancel',delete:'Delete',confirmDelete:'Delete this habit and all its history?',invalidName:'Enter a habit name (1–80 characters).',duplicate:'You already have a habit with that name.',oops:'Could not save that. Please try again.',
-      tasksEyebrow:'BUILD YOUR ROUTINE',allHabits:'All habits',week:'KEEP GROWING',weeklyGoals:'Weekly goals',goalHint:'Choose how many days each week you want to complete each habit.',goalDays:'days/week',statsEyebrow:'YOUR PROGRESS',lastSeven:'Last 7 days',completedHabits:'habit check-ins',statsHint:'Completed habits across your routine each day.',moreEyebrow:'TOOLS',moreOptions:'More options',reminderEyebrow:'STAY ON TRACK',reminderTimes:'Reminder times',reminderHint:'Choose when the bot sends your daily check-in.',addTime:'Add time',noReminders:'No reminders yet. Add a time that works for you.',reminderAdded:'Reminder added.',reminderRemoved:'Reminder removed.',invalidTime:'Choose a valid time.',duplicateTime:'That reminder time already exists.',exporting:'Preparing your download…',exported:'Your Excel file is ready.',exportFailed:'Could not export your data.',templatesEyebrow:'GET STARTED',templatesHeading:'Habit ideas',templatesHint:'Add a suggested habit with one tap. You can edit it any time.',templateWater:'Drink 6 glasses of water',templateRead:'Read 10 pages',templateWalk:'Walk 20 minutes',templateStretch:'Stretch for 5 minutes',templateSleep:'Sleep before 10:30 PM',templateMeditate:'Meditate 5 minutes',templateAdded:'Habit added to your routine 🌱',templateDuplicate:'You already have that habit.',
+      tasksEyebrow:'BUILD YOUR ROUTINE',allHabits:'All habits',week:'KEEP GROWING',weeklyGoals:'Weekly goals',goalHint:'Choose how many days each week you want to complete each habit.',goalDays:'days/week',statsEyebrow:'YOUR PROGRESS',lastSeven:'Last 7 days',completedHabits:'habit check-ins',statsHint:'Completed habits across your routine each day.',moreEyebrow:'TOOLS',moreOptions:'More options',insightEyebrow:'WEEKLY REVIEW',insightHeading:'Your week at a glance',insightAverage:'Average daily completion',insightNoData:'Complete a habit to unlock your best-day insight.',insightBest:(day,done,total)=>`Best day: ${day} · ${done}/${total} habits`,reminderEyebrow:'STAY ON TRACK',reminderTimes:'Reminder times',reminderHint:'Choose when the bot sends your daily check-in.',addTime:'Add time',noReminders:'No reminders yet. Add a time that works for you.',reminderAdded:'Reminder added.',reminderRemoved:'Reminder removed.',invalidTime:'Choose a valid time.',duplicateTime:'That reminder time already exists.',exporting:'Preparing your download…',exported:'Your Excel file is ready.',exportFailed:'Could not export your data.',templatesEyebrow:'GET STARTED',templatesHeading:'Habit ideas',templatesHint:'Add a suggested habit with one tap. You can edit it any time.',templateWater:'Drink 6 glasses of water',templateRead:'Read 10 pages',templateWalk:'Walk 20 minutes',templateStretch:'Stretch for 5 minutes',templateSleep:'Sleep before 10:30 PM',templateMeditate:'Meditate 5 minutes',templateAdded:'Habit added to your routine 🌱',templateDuplicate:'You already have that habit.',
       preferences:'PREFERENCES',language:'Language',languageHint:'Choose Khmer or English',admin:'Admin tools',adminOnly:'ADMIN ONLY',users:'users',totalTasks:'habits',maintenance:'Maintenance mode',maintenanceHint:'Pause bot actions for regular users',on:'On',off:'Off',homeTab:'Home',todayTab:'Today',tasksTab:'Habits',moreTab:'More',helpEyebrow:'QUICK GUIDE',howToUse:'How to use',help1Title:'Add a habit',help1:'Tap + and enter a short habit name.',help2Title:'Check in daily',help2:'Open Today and tap a circle when you finish a habit.',help3Title:'Track your week',help3:'Use Goals and Stats to see your progress.',help4Title:'Set reminders',help4:'Choose one or more reminder times in More.',
       auth:'Telegram could not verify this session. Close and reopen the Mini App from your bot. If it continues, the bot setup needs fixing.',serviceError:'Could not load your habits. Reopen the app from Telegram.',adminError:'Admin tools are unavailable.',close:'Close',loading:'Loading your habits…',noTasksForStats:'Add habits to see your weekly stats.'
     },
     km: {
-      screenSize:'ទំហំអេក្រង់',screenHint:'Fullscreen ជាលំនាំដើម។ អ្នកអាចប្តូរទៅទម្រង់ធម្មតាបានគ្រប់ពេល។',fullscreen:'ពេញអេក្រង់',windowed:'ទម្រង់ធម្មតា',fullscreenUnsupported:'Telegram ឬឧបករណ៍នេះមិនគាំទ្រ Fullscreen ទេ។',
+      screenSize:'ទំហំអេក្រង់',screenHint:'Fullscreen ជាលំនាំដើម។ អ្នកអាចប្តូរទៅទម្រង់ធម្មតាបានគ្រប់ពេល។',fullscreen:'ពេញអេក្រង់',windowed:'ទម្រង់ធម្មតា',fullscreenUnsupported:'Telegram ឬឧបករណ៍នេះមិនគាំទ្រ Fullscreen ទេ។',backHome:'ត្រឡប់ទៅទំព័រដើម',
       space:'ទម្លាប់ប្រចាំថ្ងៃរបស់អ្នក',welcome:'សូមស្វាគមន៍មកវិញ។',welcomeSub:'ជំហានតូចៗ បង្កើតទម្លាប់ល្អ។',menu:'ជ្រើសរើសម៉ឺនុយ',today:'ថ្ងៃនេះ',todaySub:'គូសបញ្ជាក់ទម្លាប់ថ្ងៃនេះ',habits:'ទម្លាប់របស់ខ្ញុំ',habitsSub:'មើល និងកែទម្លាប់',goals:'គោលដៅប្រចាំសប្តាហ៍',goalsSub:'តាមដានវឌ្ឍនភាព',stats:'ស្ថិតិ',statsSub:'ទិន្នន័យ ៧ ថ្ងៃចុងក្រោយ',reminders:'ការរំលឹក',remindersSub:'គ្រប់គ្រងម៉ោងរំលឹក',export:'ទាញយកទិន្នន័យ',exportSub:'ទាញយកប្រវត្តិរបស់អ្នក',calendar:'ប្រតិទិនខ្មែរ',calendarSub:'បើកគេហទំព័រប្រភព',settings:'ការកំណត់',settingsSub:'ភាសា និងចំណូលចិត្ត',help:'ជំនួយ',helpSub:'របៀបប្រើកម្មវិធី',add:'បន្ថែមទម្លាប់',
       eyebrow:'រីកចម្រើនបន្តិចម្តងៗរាល់ថ្ងៃ',heroTitle:'ធ្វើឱ្យថ្ងៃនេះមានន័យ។',heroSub:'ជំហានតូចៗ បង្កើតទម្លាប់ល្អ។',focus:'គោលដៅរបស់អ្នក',dailyHabits:'ទម្លាប់ថ្ងៃនេះ',todayLabel:'ថ្ងៃនេះ',best:'កំណត់ត្រាល្អបំផុត',footer:'ជោគជ័យតូចមួយ ក៏ជាជោគជ័យដែរ 🌿',empty:'មិនទាន់មានទម្លាប់ទេ។ បន្ថែមទម្លាប់ដំបូងរបស់អ្នក។',edit:'កែទម្លាប់',habitName:'ឈ្មោះទម្លាប់',added:'បានបន្ថែមទម្លាប់ 🌱',done:'ល្អណាស់! បន្តទៅមុខទៀត 🌱',updated:'បានរក្សាទុករួចរាល់។',deleted:'បានលុបទម្លាប់។',save:'រក្សាទុកទម្លាប់',addAction:'បន្ថែមទម្លាប់',cancel:'បោះបង់',delete:'លុប',confirmDelete:'លុបទម្លាប់ និងប្រវត្តិរបស់វាមែនទេ?',invalidName:'សូមបញ្ចូលឈ្មោះទម្លាប់ (១–៨០ តួអក្សរ)។',duplicate:'មានទម្លាប់ឈ្មោះនេះរួចហើយ។',oops:'មិនអាចរក្សាទុកបានទេ។ សូមព្យាយាមម្តងទៀត។',
-      tasksEyebrow:'បង្កើតទម្លាប់របស់អ្នក',allHabits:'ទម្លាប់ទាំងអស់',week:'បន្តរីកចម្រើន',weeklyGoals:'គោលដៅប្រចាំសប្តាហ៍',goalHint:'កំណត់ចំនួនថ្ងៃក្នុងមួយសប្តាហ៍ដែលអ្នកចង់ធ្វើទម្លាប់នីមួយៗ។',goalDays:'ថ្ងៃ/សប្តាហ៍',statsEyebrow:'វឌ្ឍនភាពរបស់អ្នក',lastSeven:'៧ ថ្ងៃចុងក្រោយ',completedHabits:'ការធ្វើទម្លាប់',statsHint:'ចំនួនទម្លាប់ដែលបានធ្វើក្នុងមួយថ្ងៃ។',moreEyebrow:'ឧបករណ៍',moreOptions:'ម៉ឺនុយបន្ថែម',reminderEyebrow:'កុំភ្លេចទម្លាប់',reminderTimes:'ម៉ោងរំលឹក',reminderHint:'ជ្រើសម៉ោងដែល bot ផ្ញើការរំលឹកប្រចាំថ្ងៃ។',addTime:'បន្ថែមម៉ោង',noReminders:'មិនទាន់មានម៉ោងរំលឹកទេ។ បន្ថែមម៉ោងដែលសមនឹងអ្នក។',reminderAdded:'បានបន្ថែមម៉ោងរំលឹក។',reminderRemoved:'បានលុបម៉ោងរំលឹក។',invalidTime:'សូមជ្រើសម៉ោងត្រឹមត្រូវ។',duplicateTime:'មានម៉ោងរំលឹកនេះរួចហើយ។',exporting:'កំពុងរៀបចំឯកសារ…',exported:'ឯកសារ Excel រួចរាល់។',exportFailed:'មិនអាចទាញយកទិន្នន័យបានទេ។',templatesEyebrow:'ចាប់ផ្តើមងាយៗ',templatesHeading:'គំនិតសម្រាប់ទម្លាប់',templatesHint:'ចុចម្ដងដើម្បីបន្ថែមទម្លាប់ណែនាំ។ អ្នកអាចកែវាពេលណាក៏បាន។',templateWater:'ផឹកទឹក ៦ កែវ',templateRead:'អានសៀវភៅ ១០ ទំព័រ',templateWalk:'ដើរ ២០ នាទី',templateStretch:'ហាត់ប្រាណស្រាល ៥ នាទី',templateSleep:'គេងមុនម៉ោង ១០:៣០ យប់',templateMeditate:'សមាធិ ៥ នាទី',templateAdded:'បានបន្ថែមទម្លាប់ទៅក្នុងបញ្ជី 🌱',templateDuplicate:'មានទម្លាប់នេះរួចហើយ។',
+      tasksEyebrow:'បង្កើតទម្លាប់របស់អ្នក',allHabits:'ទម្លាប់ទាំងអស់',week:'បន្តរីកចម្រើន',weeklyGoals:'គោលដៅប្រចាំសប្តាហ៍',goalHint:'កំណត់ចំនួនថ្ងៃក្នុងមួយសប្តាហ៍ដែលអ្នកចង់ធ្វើទម្លាប់នីមួយៗ។',goalDays:'ថ្ងៃ/សប្តាហ៍',statsEyebrow:'វឌ្ឍនភាពរបស់អ្នក',lastSeven:'៧ ថ្ងៃចុងក្រោយ',completedHabits:'ការធ្វើទម្លាប់',statsHint:'ចំនួនទម្លាប់ដែលបានធ្វើក្នុងមួយថ្ងៃ។',moreEyebrow:'ឧបករណ៍',moreOptions:'ម៉ឺនុយបន្ថែម',insightEyebrow:'សង្ខេបប្រចាំសប្តាហ៍',insightHeading:'សប្តាហ៍នេះមើលមួយភ្លែត',insightAverage:'មធ្យមភាគនៃការបំពេញប្រចាំថ្ងៃ',insightNoData:'ធ្វើទម្លាប់មួយ ដើម្បីមើលថ្ងៃដែលអ្នកធ្វើបានល្អបំផុត។',insightBest:(day,done,total)=>`ថ្ងៃល្អបំផុត៖ ${day} · ${done}/${total} ទម្លាប់`,reminderEyebrow:'កុំភ្លេចទម្លាប់',reminderTimes:'ម៉ោងរំលឹក',reminderHint:'ជ្រើសម៉ោងដែល bot ផ្ញើការរំលឹកប្រចាំថ្ងៃ។',addTime:'បន្ថែមម៉ោង',noReminders:'មិនទាន់មានម៉ោងរំលឹកទេ។ បន្ថែមម៉ោងដែលសមនឹងអ្នក។',reminderAdded:'បានបន្ថែមម៉ោងរំលឹក។',reminderRemoved:'បានលុបម៉ោងរំលឹក។',invalidTime:'សូមជ្រើសម៉ោងត្រឹមត្រូវ។',duplicateTime:'មានម៉ោងរំលឹកនេះរួចហើយ។',exporting:'កំពុងរៀបចំឯកសារ…',exported:'ឯកសារ Excel រួចរាល់។',exportFailed:'មិនអាចទាញយកទិន្នន័យបានទេ។',templatesEyebrow:'ចាប់ផ្តើមងាយៗ',templatesHeading:'គំនិតសម្រាប់ទម្លាប់',templatesHint:'ចុចម្ដងដើម្បីបន្ថែមទម្លាប់ណែនាំ។ អ្នកអាចកែវាពេលណាក៏បាន។',templateWater:'ផឹកទឹក ៦ កែវ',templateRead:'អានសៀវភៅ ១០ ទំព័រ',templateWalk:'ដើរ ២០ នាទី',templateStretch:'ហាត់ប្រាណស្រាល ៥ នាទី',templateSleep:'គេងមុនម៉ោង ១០:៣០ យប់',templateMeditate:'សមាធិ ៥ នាទី',templateAdded:'បានបន្ថែមទម្លាប់ទៅក្នុងបញ្ជី 🌱',templateDuplicate:'មានទម្លាប់នេះរួចហើយ។',
       preferences:'ចំណូលចិត្ត',language:'ភាសា',languageHint:'ជ្រើសរើសខ្មែរ ឬអង់គ្លេស',admin:'ឧបករណ៍ Admin',adminOnly:'សម្រាប់ Admin',users:'អ្នកប្រើ',totalTasks:'ទម្លាប់',maintenance:'របៀបថែទាំ',maintenanceHint:'ផ្អាកសកម្មភាព bot សម្រាប់អ្នកប្រើទូទៅ',on:'បើក',off:'បិទ',homeTab:'ដើម',todayTab:'ថ្ងៃនេះ',tasksTab:'ទម្លាប់',moreTab:'បន្ថែម',helpEyebrow:'ការណែនាំខ្លី',howToUse:'របៀបប្រើ',help1Title:'បន្ថែមទម្លាប់',help1:'ចុច + ហើយបញ្ចូលឈ្មោះទម្លាប់ខ្លីៗ។',help2Title:'កត់ត្រារាល់ថ្ងៃ',help2:'បើក ថ្ងៃនេះ ហើយចុចរង្វង់ពេលអ្នកធ្វើទម្លាប់រួច។',help3Title:'តាមដានសប្តាហ៍',help3:'ប្រើ គោលដៅ និង ស្ថិតិ ដើម្បីមើលវឌ្ឍនភាព។',help4Title:'កំណត់ការរំលឹក',help4:'ជ្រើសម៉ោងរំលឹកមួយ ឬច្រើននៅក្នុង បន្ថែម។',
       auth:'Telegram មិនអាចផ្ទៀងផ្ទាត់សម័យនេះបានទេ។ សូមបិទ ហើយបើក Mini App ពី Bot ម្តងទៀត។ បើនៅតែមានបញ្ហា ត្រូវកែការកំណត់ Bot។',serviceError:'មិនអាចផ្ទុកទម្លាប់បានទេ។ សូមបើកកម្មវិធីពី Telegram ម្តងទៀត។',adminError:'មិនអាចបើកឧបករណ៍ Admin បានទេ។',close:'បិទ',loading:'កំពុងផ្ទុកទម្លាប់…',noTasksForStats:'បន្ថែមទម្លាប់ ដើម្បីមើលស្ថិតិប្រចាំសប្តាហ៍។'
     }
@@ -122,6 +122,7 @@
       weekLabel:w.week, weekTitle:w.weeklyGoals, goalHint:w.goalHint, statsEyebrow:w.statsEyebrow,
       statsHeading:w.lastSeven, weeklyDoneLabel:w.completedHabits, statsHint:w.statsHint,
       moreEyebrow:w.moreEyebrow, moreHeading:w.moreOptions, reminderEyebrow:w.reminderEyebrow,
+      insightEyebrow:w.insightEyebrow, insightHeading:w.insightHeading, insightCaption:w.insightAverage,
       remindersHeading:w.reminderTimes, remindersHint:w.reminderHint, addReminderBtn:w.addTime,
       templatesEyebrow:w.templatesEyebrow, templatesHeading:w.templatesHeading, templatesHint:w.templatesHint,
       templateWater:w.templateWater, templateRead:w.templateRead, templateWalk:w.templateWalk,
@@ -144,6 +145,7 @@
     setText('langBtn', lang === 'en' ? 'ខ្មែរ' : 'English');
     setText('langSetting', lang === 'en' ? 'English' : 'ខ្មែរ');
     setText('screenSizeToggle', screenMode === 'fullscreen' ? w.fullscreen : w.windowed);
+    $('homeBack').setAttribute('aria-label',w.backHome);
     document.documentElement.lang = lang;
     $('editInput').placeholder = w.habitName;
     $('dialogTitle').textContent = editingTask ? w.edit : w.add;
@@ -218,6 +220,23 @@
     });
   }
 
+  function renderWeeklyInsight() {
+    const valid = weekly.filter(point => Number(point.total || 0) > 0);
+    const completed = valid.reduce((sum, point) => sum + Number(point.done || 0), 0);
+    const possible = valid.reduce((sum, point) => sum + Number(point.total || 0), 0);
+    const percent = possible ? Math.round(completed / possible * 100) : 0;
+    setText('insightPercent',`${percent}%`);
+    if (!completed) { setText('insightBestDay',copy[lang].insightNoData); return; }
+    const best = valid.reduce((winner, point) => {
+      const rate = Number(point.done || 0) / Number(point.total || 1);
+      const winnerRate = Number(winner.done || 0) / Number(winner.total || 1);
+      return rate > winnerRate ? point : winner;
+    },valid[0]);
+    const date = new Date(`${best.date}T12:00:00Z`);
+    const day = new Intl.DateTimeFormat(lang === 'km' ? 'km-KH' : 'en-US',{weekday:'long',timeZone:'Asia/Phnom_Penh'}).format(date);
+    setText('insightBestDay',copy[lang].insightBest(day,Number(best.done || 0),Number(best.total || 0)));
+  }
+
   function renderReminders() {
     const list = $('reminderList'); list.replaceChildren();
     if (!reminders.length) {
@@ -252,7 +271,7 @@
     } else {
       tasks.forEach(task=>{ todayList.append(makeHabitCard(task)); allList.append(makeHabitCard(task,true)); goalList.append(makeGoalRow(task)); });
     }
-    renderStats(); renderReminders();
+    renderStats(); renderWeeklyInsight(); renderReminders();
   }
 
   let dataDate = '';
@@ -394,6 +413,8 @@
   function openTab(tab) {
     document.querySelectorAll('.screen').forEach(screen=>screen.classList.toggle('active',screen.id===`screen-${tab}`));
     document.querySelectorAll('.nav-item').forEach(item=>item.classList.toggle('active',item.dataset.tab===tab));
+    $('homeBack').hidden=tab==='home';
+    if (tab==='home') tg?.BackButton?.hide?.(); else tg?.BackButton?.show?.();
     if (tab==='settings' && isAdmin) loadAdmin();
     window.scrollTo({top:0,behavior:'smooth'}); tg?.HapticFeedback?.selectionChanged();
   }
@@ -417,6 +438,8 @@
   $('saveEdit').addEventListener('click',saveHabit); $('deleteBtn').addEventListener('click',deleteHabit);
   $('cancelEdit').addEventListener('click',closeDialog); $('closeDialog').addEventListener('click',closeDialog);
   $('maintenanceToggle').addEventListener('click',toggleMaintenance);
+  $('homeBack').addEventListener('click',()=>openTab('home'));
+  tg?.BackButton?.onClick?.(()=>openTab('home'));
   $('editInput').addEventListener('keydown',event=>{if(event.key==='Enter')saveHabit();if(event.key==='Escape')closeDialog();});
   $('editDialog').addEventListener('click',event=>{if(event.target===$('editDialog'))closeDialog();});
 
