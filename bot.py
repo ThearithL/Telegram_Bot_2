@@ -1735,13 +1735,21 @@ def _mini_app_user():
     """Validate Telegram Web App initData before exposing user data."""
     from urllib.parse import parse_qsl
     init_data = request.headers.get("X-Telegram-Init-Data", "")
-    if not init_data or not BOT_TOKEN:
+    if not init_data:
+        logger.warning("Mini App auth rejected: Telegram initData header is missing.")
+        return None
+    if not BOT_TOKEN:
+        logger.error("Mini App auth rejected: BOT_TOKEN is not configured.")
         return None
     try:
         parsed = dict(parse_qsl(init_data, keep_blank_values=True))
         received_hash = parsed.pop("hash", "")
         auth_date = int(parsed.get("auth_date", "0"))
-        if not received_hash or abs(datetime.now(timezone.utc).timestamp() - auth_date) > 86400:
+        if not received_hash:
+            logger.warning("Mini App auth rejected: initData has no hash.")
+            return None
+        if abs(datetime.now(timezone.utc).timestamp() - auth_date) > 86400:
+            logger.warning("Mini App auth rejected: initData is older than 24 hours.")
             return None
         # Telegram defines secret_key = HMAC_SHA256(data="<bot_token>", key="WebAppData").
         # In Python's hmac.new API, key comes first and message comes second.
@@ -1749,10 +1757,12 @@ def _mini_app_user():
         data_check = "\n".join(f"{key}={value}" for key, value in sorted(parsed.items()))
         expected = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(received_hash, expected):
+            logger.warning("Mini App auth rejected: Telegram initData hash mismatch; check BOT_TOKEN matches this bot.")
             return None
         user = json.loads(parsed.get("user", "{}"))
         return int(user["id"])
     except (ValueError, TypeError, KeyError, json.JSONDecodeError):
+        logger.warning("Mini App auth rejected: initData is malformed.")
         return None
 
 
