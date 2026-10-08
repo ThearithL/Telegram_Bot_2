@@ -16,11 +16,33 @@ Besides typing commands, you now get two menus:
 - `/goals` shows each task's completions during the last 7 days and a progress bar. The same report is available from **Weekly Goals** in `/menu`.
 - Existing tasks default to a target of 7. Startup adds the database column automatically, preserving existing local or Turso data.
 
+## Telegram Mini App
+
+The project includes a bilingual Mini App at `/app` (the service root `/` redirects there). It has Today, Tasks, Goals, and Settings tabs, supports add/check/edit/delete, weekly-goal editing, and shows streaks and progress. Admin-only tools appear in Settings for the configured `ADMIN_CHAT_ID`. The old password-protected web dashboard is now at `/admin`.
+
+The Mini App opens on a dedicated **Home** menu with welcome copy, today's completion and streak summaries, and direct cards for Today, Habits, Goals, and Settings. All menu and tab labels are available in English and Khmer.
+
+The Telegram chat menu keeps frequent actions on its main screen and groups reminder times, Excel export, language, and help under **More**.
+
+For Render, set `RENDER_EXTERNAL_URL` automatically if available; otherwise set `MINI_APP_URL` to your public address ending in `/app` (for example, `https://your-service.onrender.com/app`). Configure BotFather's Main Mini App URL to the same HTTPS `/app` address. Mini App API requests validate Telegram `initData` and scope task operations to the verified user.
+
+Check-in history now enforces one row per task per local date. Existing duplicate rows are cleaned at startup by keeping the latest row, and streak displays are recalculated from the daily logs. Weekly reports consistently use today plus the previous six Cambodia dates; unlogged days count as incomplete in completion rates.
+
 ## Deployment configuration
 
 Set `BOT_TOKEN` and a strong, private `DASHBOARD_PASSWORD` in your host's environment settings. On Render, the bot stops at startup if the dashboard password is missing; local development generates a temporary password and prints it in the startup log. Optional settings: `ADMIN_CHAT_ID` (numeric Telegram chat ID), `TURSO_DATABASE_URL`, and `TURSO_AUTH_TOKEN`.
 
 ## Changelog
+
+- **Added:** a dedicated Mini App Home menu with quick links into Today,
+  Habits, Weekly Goals, and Settings, plus daily progress summaries. The menu
+  and navigation labels are localized in English and Khmer.
+- **Fixed:** `/mytasks` computed streak values after closing its database
+  connection. It now keeps the connection open while calculating streaks and
+  closes it reliably after the report is built.
+- **Fixed:** Mini App Telegram `initData` signature validation now derives the
+  Web App secret with Telegram's documented HMAC argument order, resolving the
+  unauthorized API calls seen in the deployment logs.
 
 - **Improved:** the `/menu` button grid is now fully tap-driven — no more
   typing required for day-to-day use:

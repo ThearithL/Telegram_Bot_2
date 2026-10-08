@@ -28,6 +28,8 @@ Timezone:
 import os
 import io
 import json
+import hmac
+import hashlib
 import random
 import secrets
 import sqlite3
@@ -37,7 +39,7 @@ import threading
 from functools import wraps
 from datetime import datetime, time, timedelta, timezone
 
-from flask import Flask, request, redirect, url_for, session, render_template_string, Response
+from flask import Flask, request, redirect, url_for, session, render_template_string, Response, jsonify, send_from_directory
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
@@ -65,6 +67,8 @@ try:
 except ValueError as exc:
     raise RuntimeError("ADMIN_CHAT_ID must be a numeric Telegram chat ID.") from exc
 DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "").strip()  # web dashboard login
+MINI_APP_URL = os.environ.get("MINI_APP_URL", "").strip()
+TELEGRAM_BOT_USERNAME = os.environ.get("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@")
 FLASK_SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(32))
 TIMEZONE_OFFSET_HOURS = 7  # Asia/Phnom_Penh (UTC+7), no DST
 TZ = timezone(timedelta(hours=TIMEZONE_OFFSET_HOURS))
@@ -89,6 +93,9 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
+# HTTPX INFO request logs include the full Telegram Bot API URL, which contains
+# the bot token. Keep request URLs out of Render logs.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 if TURSO_DATABASE_URL and TURSO_AUTH_TOKEN and libsql is None:
@@ -405,6 +412,13 @@ def init_db():
             done INTEGER
         )
     """)
+    # Keep one authoritative completion state per task and local calendar day.
+    c.execute("""
+        DELETE FROM logs WHERE id NOT IN (
+            SELECT MAX(id) FROM logs GROUP BY task_id, date
+        )
+    """)
+    c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_logs_task_date ON logs(task_id, date)")
     c.execute("""
         CREATE TABLE IF NOT EXISTS reminder_times (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -506,6 +520,44 @@ def yesterday_str():
     return (datetime.now(TZ) - timedelta(days=1)).strftime("%Y-%m-%d")
 
 
+def calculate_current_streak(conn, task_id, reference_date=None):
+    """Compute streak from the log table, the source of truth.
+
+    A streak remains current through today if the last completion was
+    yesterday; a missing or false daily record ends it.
+    """
+    today = reference_date or datetime.now(TZ).date()
+    today_log = conn.execute(
+        "SELECT done FROM logs WHERE task_id=? AND date=?", (task_id, today.isoformat())
+    ).fetchone()
+    if today_log and not today_log["done"]:
+        return 0
+    cursor = today if today_log and today_log["done"] else today - timedelta(days=1)
+    streak = 0
+    while True:
+        row = conn.execute(
+            "SELECT done FROM logs WHERE task_id=? AND date=?", (task_id, cursor.isoformat())
+        ).fetchone()
+        if not row or not row["done"]:
+            return streak
+        streak += 1
+        cursor -= timedelta(days=1)
+
+
+def calculate_best_streak(conn, task_id):
+    dates = conn.execute(
+        "SELECT date FROM logs WHERE task_id=? AND done=1 ORDER BY date", (task_id,)
+    ).fetchall()
+    best = current = 0
+    previous = None
+    for row in dates:
+        date = datetime.strptime(row["date"], "%Y-%m-%d").date()
+        current = current + 1 if previous and date == previous + timedelta(days=1) else 1
+        best = max(best, current)
+        previous = date
+    return best
+
+
 # ------------------------------------------------------------------
 # COMMANDS
 # ------------------------------------------------------------------
@@ -529,8 +581,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     lang = get_user_language(chat_id)
     greeting = t(lang, "welcome_short", hour=DEFAULT_REMINDER_HOUR, minute=DEFAULT_REMINDER_MINUTE)
+    keyboard = build_menu_keyboard(lang)
+    if MINI_APP_URL.startswith("https://"):
+        from telegram import WebAppInfo
+        keyboard.inline_keyboard.insert(0, [InlineKeyboardButton(
+            "📱 បើកកម្មវិធី / Open Mini App", web_app=WebAppInfo(url=MINI_APP_URL)
+        )])
     await update.message.reply_text(
-        f"{greeting}\n\n{t(lang, 'menu_title')}", reply_markup=build_menu_keyboard(lang)
+        f"{greeting}\n\n{t(lang, 'menu_title')}", reply_markup=keyboard
     )
 
 
@@ -564,26 +622,38 @@ def build_menu_keyboard(lang):
     rows = [
         [
             InlineKeyboardButton(t(lang, "menu_btn_mytasks"), callback_data="menu:mytasks"),
-            InlineKeyboardButton(t(lang, "menu_btn_mytimes"), callback_data="menu:mytimes"),
+            InlineKeyboardButton(t(lang, "menu_btn_checkin"), callback_data="menu:checkin"),
         ],
         [
             InlineKeyboardButton(t(lang, "menu_btn_stats"), callback_data="menu:stats"),
-            InlineKeyboardButton(t(lang, "menu_btn_checkin"), callback_data="menu:checkin"),
-        ],
-        [InlineKeyboardButton("🎯 " + ("គោលដៅ" if lang == "km" else "Weekly Goals"), callback_data="menu:goals")],
-        [
-            InlineKeyboardButton(t(lang, "menu_btn_export"), callback_data="menu:export"),
-            InlineKeyboardButton(t(lang, "menu_btn_language"), callback_data="menu:language"),
+            InlineKeyboardButton("🎯 " + ("គោលដៅ" if lang == "km" else "Weekly Goals"), callback_data="menu:goals"),
         ],
         [
             InlineKeyboardButton(t(lang, "menu_btn_addtask"), callback_data="menu:addtask"),
             InlineKeyboardButton(t(lang, "menu_btn_removetask"), callback_data="menu:removetask"),
         ],
         [
+            InlineKeyboardButton("⋯ " + ("បន្ថែម" if lang == "km" else "More"), callback_data="menu:more"),
+        ],
+    ]
+    return InlineKeyboardMarkup(rows)
+
+
+def build_more_menu_keyboard(lang):
+    rows = [
+        [
+            InlineKeyboardButton(t(lang, "menu_btn_mytimes"), callback_data="menu:mytimes"),
+            InlineKeyboardButton(t(lang, "menu_btn_export"), callback_data="menu:export"),
+        ],
+        [
             InlineKeyboardButton(t(lang, "menu_btn_addtime"), callback_data="menu:addtime"),
             InlineKeyboardButton(t(lang, "menu_btn_removetime"), callback_data="menu:removetime"),
         ],
-        [InlineKeyboardButton(t(lang, "menu_btn_help"), callback_data="menu:help")],
+        [
+            InlineKeyboardButton(t(lang, "menu_btn_language"), callback_data="menu:language"),
+            InlineKeyboardButton(t(lang, "menu_btn_help"), callback_data="menu:help"),
+        ],
+        [InlineKeyboardButton(t(lang, "menu_btn_back"), callback_data="menu:show")],
     ]
     return InlineKeyboardMarkup(rows)
 
@@ -677,16 +747,19 @@ async def remove_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def _mytasks_text(chat_id, lang):
     conn = get_conn()
-    tasks = conn.execute("SELECT name, streak, best_streak FROM tasks WHERE chat_id=?", (chat_id,)).fetchall()
-    conn.close()
+    try:
+        tasks = conn.execute("SELECT id, name FROM tasks WHERE chat_id=?", (chat_id,)).fetchall()
+        if not tasks:
+            return t(lang, "mytasks_empty")
 
-    if not tasks:
-        return t(lang, "mytasks_empty")
-
-    lines = [t(lang, "mytasks_header")]
-    for row in tasks:
-        lines.append(t(lang, "mytasks_line", name=row["name"], streak=row["streak"], best=row["best_streak"]))
-    return "\n".join(lines)
+        lines = [t(lang, "mytasks_header")]
+        for row in tasks:
+            lines.append(t(lang, "mytasks_line", name=row["name"],
+                           streak=calculate_current_streak(conn, row["id"]),
+                           best=calculate_best_streak(conn, row["id"])))
+        return "\n".join(lines)
+    finally:
+        conn.close()
 
 
 def _weekly_goals_text(chat_id, lang):
@@ -696,11 +769,12 @@ def _weekly_goals_text(chat_id, lang):
         conn.close()
         return t(lang, "goals_empty")
     cutoff = (datetime.now(TZ).date() - timedelta(days=6)).strftime("%Y-%m-%d")
+    end_date = today_str()
     lines = [t(lang, "goals_header")]
     for task in tasks:
         row = conn.execute(
-            "SELECT COUNT(*) c FROM logs WHERE task_id=? AND date>=? AND done=1",
-            (task["id"], cutoff),
+            "SELECT COUNT(*) c FROM logs WHERE task_id=? AND date BETWEEN ? AND ? AND done=1",
+            (task["id"], cutoff, end_date),
         ).fetchone()
         done = row["c"]
         target = max(1, min(7, int(task["weekly_goal"] or 7)))
@@ -913,12 +987,17 @@ def _stats_text(chat_id, lang):
         conn.close()
         return t(lang, "stats_empty")
 
-    cutoff = (datetime.now(TZ) - timedelta(days=7)).strftime("%Y-%m-%d")
+    end_date = datetime.now(TZ).date()
+    cutoff = (end_date - timedelta(days=6)).isoformat()
+    end_date_text = end_date.isoformat()
     lines = [t(lang, "stats_header")]
     for row in tasks:
-        logs = conn.execute("SELECT done FROM logs WHERE task_id=? AND date>=?", (row["id"], cutoff)).fetchall()
+        logs = conn.execute(
+            "SELECT done FROM logs WHERE task_id=? AND date BETWEEN ? AND ?",
+            (row["id"], cutoff, end_date_text),
+        ).fetchall()
         done_count = sum(1 for l in logs if l["done"])
-        total = len(logs) if logs else 0
+        total = 7
         pct = f"{(done_count/total*100):.0f}%" if total else "n/a"
         lines.append(t(lang, "stats_line", name=row["name"], done=done_count, total=total, pct=pct))
     conn.close()
@@ -962,7 +1041,8 @@ def build_user_export_xlsx(chat_id):
         logs = conn.execute("SELECT done FROM logs WHERE task_id=?", (task_row["id"],)).fetchall()
         total = len(logs)
         completed = sum(1 for l in logs if l["done"])
-        ws_tasks.append([task_row["name"], task_row["streak"], task_row["best_streak"], total, completed])
+        ws_tasks.append([task_row["name"], calculate_current_streak(conn, task_row["id"]),
+                         calculate_best_streak(conn, task_row["id"]), total, completed])
     style_header(ws_tasks)
     ws_tasks.freeze_panes = "A2"
     autosize(ws_tasks)
@@ -1032,13 +1112,26 @@ def _apply_checkin_for_task(conn, lang, task_id, done, date):
 
     badge_lines = []
     if done:
-        if task_row["last_done_date"] == date:
-            # Already checked in today (e.g. a second reminder time firing
-            # the same day, or re-tapping quick-toggle) — keep the streak
-            # as-is instead of recomputing it.
-            new_streak = task_row["streak"]
-        elif task_row["last_done_date"] == yesterday_str():
-            new_streak = task_row["streak"] + 1
+        previous = conn.execute(
+            "SELECT date FROM logs WHERE task_id=? AND done=1 AND date<? ORDER BY date DESC LIMIT 1",
+            (task_id, date),
+        ).fetchone()
+        previous_date = previous["date"] if previous else None
+        if previous_date == (datetime.strptime(date, "%Y-%m-%d").date() - timedelta(days=1)).isoformat():
+            # Rebuild from the stored consecutive completion history, rather
+            # than trusting a stale cached streak field.
+            new_streak = 1
+            cursor_date = datetime.strptime(date, "%Y-%m-%d").date() - timedelta(days=1)
+            while True:
+                prior = conn.execute(
+                    "SELECT done FROM logs WHERE task_id=? AND date=?", (task_id, cursor_date.isoformat())
+                ).fetchone()
+                if not prior or not prior["done"]:
+                    break
+                new_streak += 1
+                cursor_date -= timedelta(days=1)
+        elif task_row["last_done_date"] == date:
+            new_streak = max(1, task_row["streak"])
         else:
             new_streak = 1
         best = max(new_streak, task_row["best_streak"])
@@ -1187,6 +1280,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if action == "show":
             awaiting_input.pop(chat_id, None)
             await context.bot.send_message(chat_id=chat_id, text=t(lang, "menu_title"), reply_markup=build_menu_keyboard(lang))
+        elif action == "more":
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="⋯ " + ("ម៉ឺនុយបន្ថែម៖" if lang == "km" else "More options:"),
+                reply_markup=build_more_menu_keyboard(lang),
+            )
         elif action == "mytasks":
             conn = get_conn()
             has_tasks = conn.execute("SELECT id FROM tasks WHERE chat_id=?", (chat_id,)).fetchone()
@@ -1571,12 +1670,14 @@ def _dashboard_stats():
     checkins_today = conn.execute(
         "SELECT COUNT(*) c FROM logs WHERE date=? AND done=1", (today_str(),)
     ).fetchone()["c"]
-    week_cutoff = (datetime.now(TZ) - timedelta(days=7)).strftime("%Y-%m-%d")
+    week_cutoff = (datetime.now(TZ).date() - timedelta(days=6)).strftime("%Y-%m-%d")
     checkins_week = conn.execute(
-        "SELECT COUNT(*) c FROM logs WHERE date>=? AND done=1", (week_cutoff,)
+        "SELECT COUNT(*) c FROM logs WHERE date BETWEEN ? AND ? AND done=1", (week_cutoff, today_str())
     ).fetchone()["c"]
+    possible_week = tasks * 7
     conn.close()
-    return {"users": users, "tasks": tasks, "checkins_today": checkins_today, "checkins_week": checkins_week}
+    return {"users": users, "tasks": tasks, "checkins_today": checkins_today,
+            "checkins_week": checkins_week, "possible_week": possible_week}
 
 
 def _top_streaks(limit=10):
@@ -1629,6 +1730,200 @@ def _language_breakdown():
     }
 
 
+def _mini_app_user():
+    """Validate Telegram Web App initData before exposing user data."""
+    from urllib.parse import parse_qsl
+    init_data = request.headers.get("X-Telegram-Init-Data", "")
+    if not init_data or not BOT_TOKEN:
+        return None
+    try:
+        parsed = dict(parse_qsl(init_data, keep_blank_values=True))
+        received_hash = parsed.pop("hash", "")
+        auth_date = int(parsed.get("auth_date", "0"))
+        if not received_hash or abs(datetime.now(timezone.utc).timestamp() - auth_date) > 86400:
+            return None
+        # Telegram defines secret_key = HMAC_SHA256(bot_token, "WebAppData").
+        # The previous argument order was reversed and rejected every valid app request.
+        secret = hmac.new(BOT_TOKEN.encode(), b"WebAppData", hashlib.sha256).digest()
+        data_check = "\n".join(f"{key}={value}" for key, value in sorted(parsed.items()))
+        expected = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(received_hash, expected):
+            return None
+        user = json.loads(parsed.get("user", "{}"))
+        return int(user["id"])
+    except (ValueError, TypeError, KeyError, json.JSONDecodeError):
+        return None
+
+
+@flask_app.route("/app")
+def mini_app():
+    return send_from_directory(os.path.join(os.path.dirname(__file__), "webapp"), "index.html")
+
+
+@flask_app.route("/webapp/<path:filename>")
+def mini_app_asset(filename):
+    return send_from_directory(os.path.join(os.path.dirname(__file__), "webapp"), filename)
+
+
+@flask_app.route("/api/miniapp/data")
+def mini_app_data():
+    chat_id = _mini_app_user()
+    if not chat_id:
+        return jsonify({"error": "Open this app from your Telegram bot."}), 401
+    ensure_user(chat_id)
+    lang = get_user_language(chat_id)
+    conn = get_conn()
+    tasks = conn.execute(
+        "SELECT id, name, streak, best_streak, weekly_goal FROM tasks WHERE chat_id=? ORDER BY id",
+        (chat_id,),
+    ).fetchall()
+    today = today_str()
+    cutoff = (datetime.now(TZ).date() - timedelta(days=6)).strftime("%Y-%m-%d")
+    result = []
+    for task in tasks:
+        log = conn.execute("SELECT done FROM logs WHERE task_id=? AND date=?", (task["id"], today)).fetchone()
+        count = conn.execute(
+            "SELECT COUNT(*) c FROM logs WHERE task_id=? AND date BETWEEN ? AND ? AND done=1",
+            (task["id"], cutoff, today),
+        ).fetchone()["c"]
+        result.append({"id": task["id"], "name": task["name"], "done": bool(log and log["done"]),
+                       "streak": calculate_current_streak(conn, task["id"]),
+                       "best": calculate_best_streak(conn, task["id"]),
+                       "goal": task["weekly_goal"] or 7, "week_done": count})
+    conn.close()
+    return jsonify({"language": lang, "date": today, "tasks": result,
+                    "is_admin": is_admin(chat_id),
+                    "maintenance": is_maintenance_on() if is_admin(chat_id) else None})
+
+
+@flask_app.route("/api/miniapp/task", methods=["POST"])
+def mini_app_task():
+    chat_id = _mini_app_user()
+    if not chat_id:
+        return jsonify({"error": "Unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    name = str(data.get("name", "")).strip()
+    if not name or len(name) > 80:
+        return jsonify({"error": "Task name must be 1–80 characters."}), 400
+    lang = get_user_language(chat_id)
+    message, ok = _add_task_core(chat_id, lang, name)
+    if not ok:
+        return jsonify({"error": message}), 409
+    return jsonify({"ok": True})
+
+
+@flask_app.route("/api/miniapp/task/<int:task_id>", methods=["PATCH", "DELETE"])
+def mini_app_edit_task(task_id):
+    chat_id = _mini_app_user()
+    if not chat_id:
+        return jsonify({"error": "Unauthorized"}), 401
+    conn = get_conn()
+    task = conn.execute("SELECT id FROM tasks WHERE id=? AND chat_id=?", (task_id, chat_id)).fetchone()
+    if not task:
+        conn.close()
+        return jsonify({"error": "Task not found."}), 404
+    if request.method == "DELETE":
+        conn.execute("DELETE FROM logs WHERE task_id=?", (task_id,))
+        conn.execute("DELETE FROM tasks WHERE id=? AND chat_id=?", (task_id, chat_id))
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True})
+    name = str((request.get_json(silent=True) or {}).get("name", "")).strip()
+    if not name or len(name) > 80:
+        conn.close()
+        return jsonify({"error": "Task name must be 1–80 characters."}), 400
+    duplicate = conn.execute("SELECT id FROM tasks WHERE chat_id=? AND lower(name)=lower(?) AND id<>?", (chat_id, name, task_id)).fetchone()
+    if duplicate:
+        conn.close()
+        return jsonify({"error": "A task with that name already exists."}), 409
+    conn.execute("UPDATE tasks SET name=? WHERE id=? AND chat_id=?", (name, task_id, chat_id))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+@flask_app.route("/api/miniapp/goal/<int:task_id>", methods=["POST"])
+def mini_app_set_goal(task_id):
+    chat_id = _mini_app_user()
+    if not chat_id:
+        return jsonify({"error": "Unauthorized"}), 401
+    try:
+        goal = int((request.get_json(silent=True) or {}).get("goal"))
+    except (ValueError, TypeError):
+        return jsonify({"error": "Choose a goal from 1 to 7."}), 400
+    if not 1 <= goal <= 7:
+        return jsonify({"error": "Choose a goal from 1 to 7."}), 400
+    conn = get_conn()
+    task = conn.execute("SELECT id FROM tasks WHERE id=? AND chat_id=?", (task_id, chat_id)).fetchone()
+    if not task:
+        conn.close()
+        return jsonify({"error": "Task not found."}), 404
+    conn.execute("UPDATE tasks SET weekly_goal=? WHERE id=? AND chat_id=?", (goal, task_id, chat_id))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+@flask_app.route("/api/miniapp/admin", methods=["GET", "POST"])
+def mini_app_admin():
+    chat_id = _mini_app_user()
+    if not chat_id or not is_admin(chat_id):
+        return jsonify({"error": "Admin access only."}), 403
+    if request.method == "POST":
+        mode = (request.get_json(silent=True) or {}).get("maintenance")
+        if not isinstance(mode, bool):
+            return jsonify({"error": "Invalid setting."}), 400
+        set_setting("maintenance_mode", "true" if mode else "false")
+    conn = get_conn()
+    users = conn.execute("SELECT COUNT(*) c FROM users").fetchone()["c"]
+    task_count = conn.execute("SELECT COUNT(*) c FROM tasks").fetchone()["c"]
+    conn.close()
+    return jsonify({"users": users, "tasks": task_count, "maintenance": is_maintenance_on()})
+
+
+@flask_app.route("/api/miniapp/toggle", methods=["POST"])
+def mini_app_toggle():
+    chat_id = _mini_app_user()
+    if not chat_id:
+        return jsonify({"error": "Unauthorized"}), 401
+    if is_maintenance_on() and not is_admin(chat_id):
+        return jsonify({"error": "The bot is under maintenance. Try again soon."}), 503
+    data = request.get_json(silent=True) or {}
+    try:
+        task_id = int(data.get("task_id"))
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid task."}), 400
+    lang = get_user_language(chat_id)
+    conn = get_conn()
+    task = conn.execute("SELECT id FROM tasks WHERE id=? AND chat_id=?", (task_id, chat_id)).fetchone()
+    if not task:
+        conn.close()
+        return jsonify({"error": "Task not found."}), 404
+    today = today_str()
+    row = conn.execute("SELECT done FROM logs WHERE task_id=? AND date=?", (task_id, today)).fetchone()
+    done = not bool(row and row["done"])
+    summary, badges = _apply_checkin_for_task(conn, lang, task_id, done, today)
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True, "done": done, "badges": badges})
+
+
+@flask_app.route("/api/miniapp/language", methods=["POST"])
+def mini_app_language():
+    chat_id = _mini_app_user()
+    if not chat_id:
+        return jsonify({"error": "Unauthorized"}), 401
+    lang = (request.get_json(silent=True) or {}).get("language")
+    if lang not in ("km", "en"):
+        return jsonify({"error": "Unsupported language."}), 400
+    ensure_user(chat_id, lang)
+    conn = get_conn()
+    conn.execute("UPDATE users SET language=? WHERE chat_id=?", (lang, chat_id))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True, "language": lang})
+
+
 @flask_app.route("/ping")
 def ping():
     return Response("OK - Daily Habit Bot is running", mimetype="text/plain")
@@ -1652,7 +1947,7 @@ def logout():
     return redirect(url_for("login"))
 
 
-@flask_app.route("/")
+@flask_app.route("/admin")
 @_require_login
 def dashboard():
     return render_template_string(
@@ -1667,6 +1962,11 @@ def dashboard():
         checkin_series_json=json.dumps(_daily_checkin_series()),
         lang_breakdown_json=json.dumps(_language_breakdown()),
     )
+
+
+@flask_app.route("/")
+def home():
+    return redirect(url_for("mini_app"))
 
 
 @flask_app.route("/toggle-maintenance", methods=["POST"])
@@ -1769,6 +2069,8 @@ def main():
         DASHBOARD_PASSWORD = secrets.token_urlsafe(24)
         logger.warning("DASHBOARD_PASSWORD was not set. Temporary dashboard password: %s", DASHBOARD_PASSWORD)
 
+    if not MINI_APP_URL and os.environ.get("RENDER_EXTERNAL_URL"):
+        globals()["MINI_APP_URL"] = os.environ["RENDER_EXTERNAL_URL"].rstrip("/") + "/app"
     threading.Thread(target=run_dashboard, daemon=True).start()
 
     application = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
