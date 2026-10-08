@@ -22,6 +22,8 @@ The project includes a bilingual Mini App at `/app` (the service root `/` redire
 
 The Mini App opens on a dedicated **Home** menu with welcome copy, today's completion and streak summaries, and direct cards for Today, Habits, Goals, Stats, Reminders, Export, Khmer Calendar, Settings, and Help. All menu and tab labels are available in English and Khmer.
 
+The **More** tab also includes one-tap habit ideas (water, reading, walking, stretching, sleep, and meditation). The bot's `/menu` and `/start` button menus include an **Open Mini App** button, and the bot's **More** menu opens the Mini App directly on its More tab. In Settings, users can switch between Fullscreen and Windowed; Fullscreen is the default and the choice is remembered on that device. Telegram versions or devices without fullscreen support use the expanded view instead.
+
 The Telegram chat menu keeps frequent actions on its main screen and groups reminder times, Excel export, language, and help under **More**.
 
 For Render, set `RENDER_EXTERNAL_URL` automatically if available; otherwise set `MINI_APP_URL` to your public address ending in `/app` (for example, `https://your-service.onrender.com/app`). Configure BotFather's Main Mini App URL to the same HTTPS `/app` address. Mini App API requests validate Telegram `initData` and scope task operations to the verified user.
@@ -33,6 +35,13 @@ Check-in history now enforces one row per task per local date. Existing duplicat
 Set `BOT_TOKEN` and a strong, private `DASHBOARD_PASSWORD` in your host's environment settings. On Render, the bot stops at startup if the dashboard password is missing; local development generates a temporary password and prints it in the startup log. Optional settings: `ADMIN_CHAT_ID` (numeric Telegram chat ID), `TURSO_DATABASE_URL`, and `TURSO_AUTH_TOKEN`.
 
 ## Changelog
+
+- **Added:** one-tap habit ideas in the Mini App's More tab and Mini App launch
+  buttons in the bot's main and More menus.
+- **Added:** a remembered Fullscreen/Windowed setting, with Fullscreen as the
+  default and expanded-view fallback on unsupported Telegram clients.
+- **Improved:** the screen-size setting follows changes made from Telegram's
+  own fullscreen controls.
 
 - **Improved:** Mini App navigation and mobile layout, with clearer Home, Today,
   Habits, and More sections, a weekly progress chart, reminder management,

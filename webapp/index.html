@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f5f7f4">
   <title>My Daily Habits</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="/webapp/style.css">
+  <link rel="stylesheet" href="/webapp/style.css?v=20261008-3">
 </head>
 <body>
   <main class="shell">
@@ -64,6 +64,14 @@
     <section class="screen" id="screen-more">
       <div class="section-head"><div><p class="eyebrow" id="moreEyebrow">TOOLS</p><h2 id="moreHeading">More options</h2></div></div>
       <section class="week-card reminder-card"><div class="week-head"><div><p class="eyebrow" id="reminderEyebrow">STAY ON TRACK</p><h2 id="remindersHeading">Reminder times</h2></div><span class="week-icon">⏰</span></div><p class="hint" id="remindersHint">Choose when the bot sends your daily check-in.</p><div id="reminderList" class="reminder-list"></div><div class="reminder-add"><input id="reminderInput" type="time" aria-label="Reminder time"><button id="addReminderBtn" class="save-action" type="button">Add time</button></div></section>
+      <section class="week-card template-card-wrap"><div class="week-head"><div><p class="eyebrow" id="templatesEyebrow">GET STARTED</p><h2 id="templatesHeading">Habit ideas</h2></div><span class="week-icon">✨</span></div><p class="hint" id="templatesHint">Add a suggested habit with one tap. You can edit it any time.</p><div class="template-grid">
+        <button class="template-card" data-template="water" type="button"><span>💧</span><strong id="templateWater">Drink 6 glasses of water</strong><i>＋</i></button>
+        <button class="template-card" data-template="read" type="button"><span>📖</span><strong id="templateRead">Read 10 pages</strong><i>＋</i></button>
+        <button class="template-card" data-template="walk" type="button"><span>🚶</span><strong id="templateWalk">Walk 20 minutes</strong><i>＋</i></button>
+        <button class="template-card" data-template="stretch" type="button"><span>🧘</span><strong id="templateStretch">Stretch for 5 minutes</strong><i>＋</i></button>
+        <button class="template-card" data-template="sleep" type="button"><span>🌙</span><strong id="templateSleep">Sleep before 10:30 PM</strong><i>＋</i></button>
+        <button class="template-card" data-template="meditate" type="button"><span>🌿</span><strong id="templateMeditate">Meditate 5 minutes</strong><i>＋</i></button>
+      </div></section>
       <section class="more-grid">
         <button class="menu-card" id="moreExportBtn" type="button"><span class="menu-icon">📥</span><span><strong id="moreExportTitle">Export data</strong><small id="moreExportSub">Download Excel history</small></span></button>
         <button class="menu-card" id="moreCalendarBtn" type="button"><span class="menu-icon">🌙</span><span><strong id="moreCalendarTitle">Khmer Calendar</strong><small id="moreCalendarSub">Open calendar source</small></span></button>
@@ -75,6 +83,7 @@
     <section class="screen" id="screen-settings">
       <div class="section-head"><div><p class="eyebrow" id="settingsEyebrow">PREFERENCES</p><h2 id="settingsHeading">Settings</h2></div></div>
       <div class="setting-card"><div><strong id="languageName">Language</strong><small id="languageHint">Choose Khmer or English</small></div><button id="langSetting" class="setting-action" type="button">English</button></div>
+      <div class="setting-card"><div><strong id="screenSizeName">Screen size</strong><small id="screenSizeHint">Fullscreen is enabled by default. Choose standard size any time.</small></div><button id="screenSizeToggle" class="setting-action" type="button">Fullscreen</button></div>
       <section id="adminPanel" class="admin-panel" hidden><div class="section-head"><div><p class="eyebrow" id="adminEyebrow">ADMIN ONLY</p><h2 id="adminHeading">Admin tools</h2></div><span>🛡️</span></div><div class="admin-stats"><div><strong id="adminUsers">—</strong><small id="usersLabel">users</small></div><div><strong id="adminTasks">—</strong><small id="totalTasksLabel">habits</small></div></div><div class="setting-card"><div><strong id="maintenanceName">Maintenance mode</strong><small id="maintenanceHint">Pause bot actions for regular users</small></div><button id="maintenanceToggle" class="setting-action" type="button">Off</button></div></section>
     </section>
 
@@ -98,6 +107,6 @@
 
   <div id="editDialog" class="dialog-backdrop" hidden><section class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialogTitle"><button id="closeDialog" class="dialog-close" type="button" aria-label="Close">×</button><p class="eyebrow" id="dialogEyebrow">YOUR ROUTINE</p><h2 id="dialogTitle">Edit habit</h2><label id="habitLabel" for="editInput">Habit name</label><input id="editInput" maxlength="80" autocomplete="off"><p id="dialogError" class="dialog-error" aria-live="polite"></p><div class="dialog-actions"><button id="deleteBtn" class="delete-action" type="button">Delete</button><span></span><button id="cancelEdit" class="cancel-action" type="button">Cancel</button><button id="saveEdit" class="save-action" type="button">Save</button></div></section></div>
   <div class="toast" id="toast" role="status"></div>
-  <script src="/webapp/app.js"></script>
+  <script src="/webapp/app.js?v=20261008-3"></script>
 </body>
 </html>

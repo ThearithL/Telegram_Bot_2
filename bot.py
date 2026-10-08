@@ -43,7 +43,7 @@ from flask import Flask, request, redirect, url_for, session, render_template_st
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, BotCommand
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, BotCommand, WebAppInfo
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -582,11 +582,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = get_user_language(chat_id)
     greeting = t(lang, "welcome_short", hour=DEFAULT_REMINDER_HOUR, minute=DEFAULT_REMINDER_MINUTE)
     keyboard = build_menu_keyboard(lang)
-    if MINI_APP_URL.startswith("https://"):
-        from telegram import WebAppInfo
-        keyboard.inline_keyboard.insert(0, [InlineKeyboardButton(
-            "📱 បើកកម្មវិធី / Open Mini App", web_app=WebAppInfo(url=MINI_APP_URL)
-        )])
     await update.message.reply_text(
         f"{greeting}\n\n{t(lang, 'menu_title')}", reply_markup=keyboard
     )
@@ -636,11 +631,33 @@ def build_menu_keyboard(lang):
             InlineKeyboardButton("⋯ " + ("បន្ថែម" if lang == "km" else "More"), callback_data="menu:more"),
         ],
     ]
+    app_button = build_mini_app_button(lang)
+    if app_button:
+        rows.insert(0, [app_button])
     return InlineKeyboardMarkup(rows)
 
 
+def build_mini_app_button(lang, view=None):
+    """Return a Telegram Web App button, optionally opening a chosen screen."""
+    if not MINI_APP_URL.startswith("https://"):
+        return None
+    url = MINI_APP_URL
+    if view:
+        from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+        parts = urlsplit(url)
+        query = dict(parse_qsl(parts.query, keep_blank_values=True))
+        query["view"] = view
+        url = urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+    label = "📱 បើក Mini App" if lang == "km" else "📱 Open Mini App"
+    return InlineKeyboardButton(label, web_app=WebAppInfo(url=url))
+
+
 def build_more_menu_keyboard(lang):
-    rows = [
+    rows = []
+    app_button = build_mini_app_button(lang, view="more")
+    if app_button:
+        rows.append([app_button])
+    rows.extend([
         [
             InlineKeyboardButton(t(lang, "menu_btn_mytimes"), callback_data="menu:mytimes"),
             InlineKeyboardButton(t(lang, "menu_btn_export"), callback_data="menu:export"),
@@ -654,7 +671,7 @@ def build_more_menu_keyboard(lang):
             InlineKeyboardButton(t(lang, "menu_btn_help"), callback_data="menu:help"),
         ],
         [InlineKeyboardButton(t(lang, "menu_btn_back"), callback_data="menu:show")],
-    ]
+    ])
     return InlineKeyboardMarkup(rows)
 
 
