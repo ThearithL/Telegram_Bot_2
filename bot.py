@@ -1754,9 +1754,20 @@ def _mini_app_user():
         # Telegram defines secret_key = HMAC_SHA256(data="<bot_token>", key="WebAppData").
         # In Python's hmac.new API, key comes first and message comes second.
         secret = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
-        data_check = "\n".join(f"{key}={value}" for key, value in sorted(parsed.items()))
-        expected = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(received_hash, expected):
+        # Telegram may include an Ed25519 `signature` alongside the bot-token
+        # HMAC. Accept the HMAC forms used by both Mini App payload versions;
+        # user/auth fields remain covered in either case.
+        check_variants = [parsed]
+        if "signature" in parsed:
+            check_variants.append({key: value for key, value in parsed.items() if key != "signature"})
+        valid_hash = False
+        for fields in check_variants:
+            data_check = "\n".join(f"{key}={value}" for key, value in sorted(fields.items()))
+            expected = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
+            if hmac.compare_digest(received_hash, expected):
+                valid_hash = True
+                break
+        if not valid_hash:
             logger.warning("Mini App auth rejected: Telegram initData hash mismatch; check BOT_TOKEN matches this bot.")
             return None
         user = json.loads(parsed.get("user", "{}"))
