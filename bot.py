@@ -39,7 +39,7 @@ import threading
 from functools import wraps
 from datetime import datetime, time, timedelta, timezone
 
-from flask import Flask, request, redirect, url_for, session, render_template_string, Response, jsonify, send_from_directory
+from flask import Flask, request, redirect, url_for, session, render_template_string, Response, jsonify, send_from_directory, send_file
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
@@ -1445,6 +1445,7 @@ async def schedule_all_users(application: Application):
 # ------------------------------------------------------------------
 flask_app = Flask(__name__)
 flask_app.secret_key = FLASK_SECRET_KEY
+BOT_APPLICATION = None
 
 DASHBOARD_CSS = """
 :root{
@@ -1742,8 +1743,8 @@ def _mini_app_user():
         auth_date = int(parsed.get("auth_date", "0"))
         if not received_hash or abs(datetime.now(timezone.utc).timestamp() - auth_date) > 86400:
             return None
-        # Telegram defines secret_key = HMAC_SHA256(bot_token, "WebAppData").
-        # The previous argument order was reversed and rejected every valid app request.
+        # Telegram defines secret_key = HMAC_SHA256(data="<bot_token>", key="WebAppData").
+        # In Python's hmac.new API, key comes first and message comes second.
         secret = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
         data_check = "\n".join(f"{key}={value}" for key, value in sorted(parsed.items()))
         expected = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
@@ -1790,10 +1791,81 @@ def mini_app_data():
                        "streak": calculate_current_streak(conn, task["id"]),
                        "best": calculate_best_streak(conn, task["id"]),
                        "goal": task["weekly_goal"] or 7, "week_done": count})
+    daily_rows = conn.execute(
+        """SELECT logs.date, SUM(CASE WHEN logs.done=1 THEN 1 ELSE 0 END) AS done
+           FROM logs JOIN tasks ON tasks.id=logs.task_id
+           WHERE tasks.chat_id=? AND logs.date BETWEEN ? AND ?
+           GROUP BY logs.date""",
+        (chat_id, cutoff, today),
+    ).fetchall()
+    done_by_date = {row["date"]: row["done"] for row in daily_rows}
+    weekly = []
+    for offset in range(6, -1, -1):
+        day = (datetime.now(TZ).date() - timedelta(days=offset)).isoformat()
+        weekly.append({"date": day, "done": done_by_date.get(day, 0), "total": len(tasks)})
+    reminders = conn.execute(
+        "SELECT id, hour, minute FROM reminder_times WHERE chat_id=? ORDER BY hour, minute", (chat_id,)
+    ).fetchall()
     conn.close()
     return jsonify({"language": lang, "date": today, "tasks": result,
+                    "weekly": weekly,
+                    "reminders": [{"id": r["id"], "time": f"{r['hour']:02d}:{r['minute']:02d}"} for r in reminders],
                     "is_admin": is_admin(chat_id),
                     "maintenance": is_maintenance_on() if is_admin(chat_id) else None})
+
+
+@flask_app.route("/api/miniapp/reminders", methods=["POST", "DELETE"])
+def mini_app_reminders():
+    chat_id = _mini_app_user()
+    if not chat_id:
+        return jsonify({"error": "Unauthorized"}), 401
+    conn = get_conn()
+    if request.method == "POST":
+        value = str((request.get_json(silent=True) or {}).get("time", "")).strip()
+        try:
+            hour, minute = _parse_hhmm(value)
+        except ValueError:
+            conn.close()
+            return jsonify({"error": "Use a valid time, such as 08:30."}), 400
+        exists = conn.execute(
+            "SELECT id FROM reminder_times WHERE chat_id=? AND hour=? AND minute=?",
+            (chat_id, hour, minute),
+        ).fetchone()
+        if exists:
+            conn.close()
+            return jsonify({"error": "That reminder time already exists."}), 409
+        conn.execute("INSERT INTO reminder_times (chat_id, hour, minute) VALUES (?, ?, ?)",
+                     (chat_id, hour, minute))
+        conn.commit()
+        conn.close()
+        if BOT_APPLICATION is not None:
+            schedule_all_times_for_user(BOT_APPLICATION, chat_id)
+        return jsonify({"ok": True})
+
+    try:
+        reminder_id = int((request.get_json(silent=True) or {}).get("id"))
+    except (TypeError, ValueError):
+        conn.close()
+        return jsonify({"error": "Invalid reminder."}), 400
+    cursor = conn.execute("DELETE FROM reminder_times WHERE id=? AND chat_id=?", (reminder_id, chat_id))
+    conn.commit()
+    conn.close()
+    if not cursor.rowcount:
+        return jsonify({"error": "Reminder not found."}), 404
+    if BOT_APPLICATION is not None:
+        schedule_all_times_for_user(BOT_APPLICATION, chat_id)
+    return jsonify({"ok": True})
+
+
+@flask_app.route("/api/miniapp/export")
+def mini_app_export():
+    chat_id = _mini_app_user()
+    if not chat_id:
+        return jsonify({"error": "Unauthorized"}), 401
+    file_obj = build_user_export_xlsx(chat_id)
+    return send_file(file_obj, as_attachment=True,
+                     download_name=f"habit_data_{today_str()}.xlsx",
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
 @flask_app.route("/api/miniapp/task", methods=["POST"])
@@ -2056,7 +2128,7 @@ async def error_handler(update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def main():
-    global DASHBOARD_PASSWORD
+    global DASHBOARD_PASSWORD, BOT_APPLICATION
     if not BOT_TOKEN:
         logger.error("BOT_TOKEN is not configured.")
         raise RuntimeError("Set the BOT_TOKEN environment variable before running.")
@@ -2074,6 +2146,7 @@ def main():
     threading.Thread(target=run_dashboard, daemon=True).start()
 
     application = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
+    BOT_APPLICATION = application
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))

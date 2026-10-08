@@ -125,3 +125,37 @@ footer { padding:17px 0 4px; color:#8b978e; font-size:10px; text-align:center; }
 .toast.show { transform:translateY(0); opacity:1; }
 @media (min-width:700px) { .shell { padding-top:34px; } .hero { min-height:178px; } .hero h2 { font-size:26px; } .dialog-backdrop { place-items:center; } }
 @media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important; animation-duration:.01ms!important; transition-duration:.01ms!important; } }
+
+/* Simple supporting screens and clear feedback for the Telegram Mini App. */
+[hidden] { display:none!important; }
+.connection-error { margin:0 0 15px; padding:12px 14px; border:1px solid #f0c9bd; border-radius:13px; background:#fff3ee; color:#8d3e2c; font-size:12px; line-height:1.5; }
+.more-grid { display:grid; grid-template-columns:1fr; gap:9px; margin-top:12px; }
+.more-grid .menu-card { min-height:66px; }
+.stats-card { padding:17px 14px; border:1px solid var(--line); border-radius:19px; background:var(--card); box-shadow:var(--shadow); }
+.stats-total { display:flex; align-items:center; justify-content:space-between; padding:2px 2px 13px; }
+.stats-total strong,.stats-total small { display:block; }
+.stats-total strong { color:var(--green-dark); font-size:30px; line-height:1.1; letter-spacing:-1px; }
+.stats-total small { margin-top:5px; color:var(--muted); font-size:10px; }
+.stats-total>span { display:grid; width:43px; height:43px; place-items:center; border-radius:14px; background:#edf5eb; font-size:20px; }
+.weekly-chart { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); align-items:end; gap:7px; min-height:142px; padding:12px 2px 3px; border-top:1px solid var(--line); }
+.chart-day { display:grid; grid-template-rows:15px 86px 18px; justify-items:center; align-items:end; gap:5px; min-width:0; }
+.chart-day small { color:var(--muted); font-size:9px; line-height:1; white-space:nowrap; }
+.chart-track { display:flex; width:min(24px,100%); height:100%; align-items:end; overflow:hidden; border-radius:8px; background:#f0f4ef; }
+.chart-track i { display:block; width:100%; min-height:4px; border-radius:8px; background:#9fc8a2; transition:height .2s ease; }
+.chart-track i.today-bar { background:var(--green); }
+.reminder-card { margin-bottom:12px; }
+.reminder-list { display:grid; gap:7px; margin-top:12px; }
+.reminder-empty { padding:14px; font-size:11px; }
+.reminder-row { display:flex; min-height:45px; align-items:center; justify-content:space-between; padding:6px 10px 6px 13px; border:1px solid var(--line); border-radius:12px; background:#fbfcfa; }
+.reminder-row strong { color:var(--green-dark); font-size:14px; font-variant-numeric:tabular-nums; }
+.reminder-remove { min-height:32px; padding:0 10px; border:0; border-radius:9px; background:#fff0ed; color:#a34432; font-size:10px; font-weight:800; }
+.reminder-add { display:flex; gap:8px; margin-top:10px; }
+.reminder-add input { flex:1; min-width:0; min-height:42px; padding:0 10px; border:1px solid #dce5dc; border-radius:11px; background:#fbfcfa; color:var(--ink); }
+.reminder-add .save-action { min-width:88px; padding:0 12px; border:0; border-radius:11px; font-size:11px; font-weight:800; }
+.help-list { display:grid; gap:9px; }
+.help-list article { display:flex; align-items:flex-start; gap:12px; padding:14px; border:1px solid var(--line); border-radius:15px; background:var(--card); box-shadow:var(--shadow); }
+.help-list article>span { display:grid; flex:0 0 27px; width:27px; height:27px; place-items:center; border-radius:9px; background:var(--green-soft); color:var(--green-dark); font-size:11px; font-weight:800; }
+.help-list strong { display:block; margin-top:2px; font-size:12px; }
+.help-list p { margin:5px 0 0; color:var(--muted); font-size:11px; line-height:1.5; }
+.toast.toast-error { background:#8d3e2c; }
+@media (min-width:440px) { .more-grid { grid-template-columns:1fr 1fr; } }

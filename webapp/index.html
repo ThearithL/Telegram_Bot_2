@@ -1,8 +1,10 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-  <meta name="theme-color" content="#f5f6fa"><title>My Daily Habits</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <meta name="theme-color" content="#f5f7f4">
+  <title>My Daily Habits</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <link rel="stylesheet" href="/webapp/style.css">
 </head>
@@ -10,59 +12,92 @@
   <main class="shell">
     <header class="top">
       <div><div class="eyebrow" id="todayLabel">YOUR DAILY SPACE</div><h1 id="title">My Daily Habits <span>✦</span></h1></div>
-      <button id="langBtn" class="lang">ខ្មែរ</button>
+      <button id="langBtn" class="lang" type="button">ខ្មែរ</button>
     </header>
+    <div id="connectionError" class="connection-error" role="alert" hidden></div>
+
     <section class="screen active" id="screen-home">
       <section class="hero home-hero">
-        <div class="hero-copy"><span class="sun">👋</span><p id="welcomeEyebrow">WELCOME BACK</p><h2 id="welcomeTitle">Welcome to your daily space.</h2><p id="welcomeSub">A simple place to build habits and keep your routine moving.</p></div>
+        <div class="hero-copy"><span class="sun">👋</span><p id="welcomeEyebrow">WELCOME BACK</p><h2 id="welcomeTitle">Welcome to your daily space.</h2><p id="welcomeSub">Small steps make strong routines.</p></div>
         <div class="plant" aria-hidden="true"><span>🌱</span></div>
       </section>
-      <section class="summary home-summary"><div><span class="summary-icon">✅</span><div><strong id="homeDone">0/0</strong><small id="homeDoneLabel">done today</small></div></div><div><span class="summary-icon">🔥</span><div><strong id="homeStreak">0</strong><small id="homeStreakLabel">best streak</small></div></div></section>
-      <div class="section-head"><div><p class="eyebrow" id="menuEyebrow">YOUR SPACE</p><h2 id="menuTitle">Choose where to go</h2></div></div>
+      <section class="summary home-summary">
+        <div><span class="summary-icon">✅</span><div><strong id="homeDone">0/0</strong><small id="homeDoneLabel">done today</small></div></div>
+        <div><span class="summary-icon">🔥</span><div><strong id="homeStreak">0</strong><small id="homeStreakLabel">best streak</small></div></div>
+      </section>
+      <div class="section-head"><div><p class="eyebrow" id="menuEyebrow">YOUR SPACE</p><h2 id="menuTitle">Choose an option</h2></div><button class="add" id="quickAdd" type="button" aria-label="Add a habit">＋</button></div>
       <section class="menu-grid">
-        <button class="menu-card menu-primary" data-open="today"><span class="menu-icon">☀️</span><strong id="menuTodayTitle">Today</strong></button>
-        <button class="menu-card" data-open="tasks"><span class="menu-icon">☑️</span><strong id="menuTasksTitle">My habits</strong></button>
-        <button class="menu-card" data-open="goals"><span class="menu-icon">🎯</span><strong id="menuGoalsTitle">Weekly goals</strong></button>
-        <button class="menu-card" id="calendarLink"><span class="menu-icon">🌙</span><span><strong id="menuCalendarTitle">Khmer Calendar</strong><small id="menuCalendarSub">Open the calendar source</small></span></button>
-        <button class="menu-card" id="quickAdd"><span class="menu-icon">＋</span><strong id="menuAddTitle">Add a habit</strong></button>
-        <button class="menu-card" data-open="settings"><span class="menu-icon">⚙️</span><strong id="menuSettingsTitle">Settings</strong></button>
+        <button class="menu-card menu-primary" data-open="today" type="button"><span class="menu-icon">☀️</span><span><strong id="menuTodayTitle">Today</strong><small id="menuTodaySub">Check off today's habits</small></span></button>
+        <button class="menu-card" data-open="tasks" type="button"><span class="menu-icon">☑️</span><span><strong id="menuTasksTitle">My habits</strong><small id="menuTasksSub">View and edit habits</small></span></button>
+        <button class="menu-card" data-open="goals" type="button"><span class="menu-icon">🎯</span><span><strong id="menuGoalsTitle">Weekly goals</strong><small id="menuGoalsSub">Track your progress</small></span></button>
+        <button class="menu-card" data-open="stats" type="button"><span class="menu-icon">📊</span><span><strong id="menuStatsTitle">Stats</strong><small id="menuStatsSub">Your last 7 days</small></span></button>
+        <button class="menu-card" data-open="more" type="button"><span class="menu-icon">⏰</span><span><strong id="menuRemindersTitle">Reminders</strong><small id="menuRemindersSub">Manage reminder times</small></span></button>
+        <button class="menu-card" id="exportBtn" type="button"><span class="menu-icon">📥</span><span><strong id="menuExportTitle">Export data</strong><small id="menuExportSub">Download your history</small></span></button>
+        <button class="menu-card" id="calendarLink" type="button"><span class="menu-icon">🌙</span><span><strong id="menuCalendarTitle">Khmer Calendar</strong><small id="menuCalendarSub">Open the calendar source</small></span></button>
+        <button class="menu-card" data-open="settings" type="button"><span class="menu-icon">⚙️</span><span><strong id="menuSettingsTitle">Settings</strong><small id="menuSettingsSub">Language and preferences</small></span></button>
+        <button class="menu-card" data-open="help" type="button"><span class="menu-icon">❔</span><span><strong id="menuHelpTitle">Help</strong><small id="menuHelpSub">How to use the app</small></span></button>
       </section>
     </section>
+
     <section class="screen" id="screen-today">
-    <section class="hero">
-      <div class="hero-copy"><span class="sun">☀️</span><p id="heroEyebrow">A little progress, every day</p><h2 id="heroTitle">Make today count.</h2><p id="heroSub">Small steps grow into strong habits.</p></div>
-      <div class="plant" aria-hidden="true"><span>🌱</span></div>
-    </section>
-    <section class="summary" data-screen="today">
-      <div><span class="summary-icon">✅</span><div><strong id="doneCount">0/0</strong><small id="todayProgressLabel">today</small></div></div>
-      <div><span class="summary-icon">🔥</span><div><strong id="streakCount">0</strong><small id="streakLabel">best streak</small></div></div>
-    </section>
-      <div class="section-head"><div><p class="eyebrow" id="focusLabel">YOUR FOCUS</p><h2 id="habitsTitle">Daily habits</h2></div><button class="add" id="addBtn" aria-label="Add habit">＋</button></div>
+      <section class="hero"><div class="hero-copy"><span class="sun">☀️</span><p id="heroEyebrow">A little progress, every day</p><h2 id="heroTitle">Make today count.</h2><p id="heroSub">Small steps grow into strong habits.</p></div><div class="plant" aria-hidden="true"><span>🌱</span></div></section>
+      <section class="summary"><div><span class="summary-icon">✅</span><div><strong id="doneCount">0/0</strong><small id="todayProgressLabel">today</small></div></div><div><span class="summary-icon">🔥</span><div><strong id="streakCount">0</strong><small id="streakLabel">best streak</small></div></div></section>
+      <div class="section-head"><div><p class="eyebrow" id="focusLabel">YOUR FOCUS</p><h2 id="habitsTitle">Today's habits</h2></div><button class="add" id="addBtn" type="button" aria-label="Add habit">＋</button></div>
       <section id="taskList" class="task-list"><div class="loading"><span></span><span></span><span></span></div></section>
       <footer id="footerText">One small win is still a win. 🌿</footer>
     </section>
+
     <section class="screen" id="screen-tasks">
-      <div class="section-head"><div><p class="eyebrow" id="tasksEyebrow">BUILD YOUR ROUTINE</p><h2 id="tasksHeading">All habits</h2></div><button class="add" id="addBtn2" aria-label="Add habit">＋</button></div>
+      <div class="section-head"><div><p class="eyebrow" id="tasksEyebrow">BUILD YOUR ROUTINE</p><h2 id="tasksHeading">All habits</h2></div><button class="add" id="addBtn2" type="button" aria-label="Add habit">＋</button></div>
       <section id="allTaskList" class="task-list"></section>
     </section>
+
     <section class="screen" id="screen-goals">
-      <section class="week-card standalone"><div class="week-head"><div><p class="eyebrow" id="weekLabel">KEEP GROWING</p><h2 id="weekTitle">Weekly goals</h2></div><span class="week-icon">🎯</span></div><p id="goalHint" class="hint">Choose a goal for each habit, then track your progress over the last 7 days.</p><div id="goalList" class="goal-list"></div></section>
+      <section class="week-card standalone"><div class="week-head"><div><p class="eyebrow" id="weekLabel">KEEP GROWING</p><h2 id="weekTitle">Weekly goals</h2></div><span class="week-icon">🎯</span></div><p id="goalHint" class="hint">Choose how many days each week you want to complete each habit.</p><div id="goalList" class="goal-list"></div></section>
     </section>
+
+    <section class="screen" id="screen-stats">
+      <div class="section-head"><div><p class="eyebrow" id="statsEyebrow">YOUR PROGRESS</p><h2 id="statsHeading">Last 7 days</h2></div></div>
+      <section class="stats-card"><div class="stats-total"><div><strong id="weeklyDone">0</strong><small id="weeklyDoneLabel">habits completed</small></div><span>📈</span></div><div id="weeklyChart" class="weekly-chart"></div><p class="hint" id="statsHint">Completion counts across your habits for each day.</p></section>
+    </section>
+
+    <section class="screen" id="screen-more">
+      <div class="section-head"><div><p class="eyebrow" id="moreEyebrow">TOOLS</p><h2 id="moreHeading">More options</h2></div></div>
+      <section class="week-card reminder-card"><div class="week-head"><div><p class="eyebrow" id="reminderEyebrow">STAY ON TRACK</p><h2 id="remindersHeading">Reminder times</h2></div><span class="week-icon">⏰</span></div><p class="hint" id="remindersHint">Choose when the bot sends your daily check-in.</p><div id="reminderList" class="reminder-list"></div><div class="reminder-add"><input id="reminderInput" type="time" aria-label="Reminder time"><button id="addReminderBtn" class="save-action" type="button">Add time</button></div></section>
+      <section class="more-grid">
+        <button class="menu-card" id="moreExportBtn" type="button"><span class="menu-icon">📥</span><span><strong id="moreExportTitle">Export data</strong><small id="moreExportSub">Download Excel history</small></span></button>
+        <button class="menu-card" id="moreCalendarBtn" type="button"><span class="menu-icon">🌙</span><span><strong id="moreCalendarTitle">Khmer Calendar</strong><small id="moreCalendarSub">Open calendar source</small></span></button>
+        <button class="menu-card" data-open="settings" type="button"><span class="menu-icon">⚙️</span><span><strong id="moreSettingsTitle">Settings</strong><small id="moreSettingsSub">Language and preferences</small></span></button>
+        <button class="menu-card" data-open="help" type="button"><span class="menu-icon">❔</span><span><strong id="moreHelpTitle">Help</strong><small id="moreHelpSub">Learn the basics</small></span></button>
+      </section>
+    </section>
+
     <section class="screen" id="screen-settings">
       <div class="section-head"><div><p class="eyebrow" id="settingsEyebrow">PREFERENCES</p><h2 id="settingsHeading">Settings</h2></div></div>
-      <div class="setting-card"><div><strong id="languageName">Language</strong><small id="languageHint">Choose Khmer or English</small></div><button id="langSetting" class="setting-action">English</button></div>
-      <div class="setting-card"><div><strong id="reminderName">Reminders</strong><small id="reminderHint">Manage reminder times in the bot menu</small></div><span>⏰</span></div>
-      <section id="adminPanel" class="admin-panel" hidden><div class="section-head"><div><p class="eyebrow" id="adminEyebrow">ADMIN ONLY</p><h2 id="adminHeading">Admin tools</h2></div><span>🛡️</span></div><div class="admin-stats"><div><strong id="adminUsers">—</strong><small id="usersLabel">users</small></div><div><strong id="adminTasks">—</strong><small id="totalTasksLabel">tasks</small></div></div><div class="setting-card"><div><strong id="maintenanceName">Maintenance mode</strong><small id="maintenanceHint">Pause normal bot actions</small></div><button id="maintenanceToggle" class="setting-action">Off</button></div></section>
+      <div class="setting-card"><div><strong id="languageName">Language</strong><small id="languageHint">Choose Khmer or English</small></div><button id="langSetting" class="setting-action" type="button">English</button></div>
+      <section id="adminPanel" class="admin-panel" hidden><div class="section-head"><div><p class="eyebrow" id="adminEyebrow">ADMIN ONLY</p><h2 id="adminHeading">Admin tools</h2></div><span>🛡️</span></div><div class="admin-stats"><div><strong id="adminUsers">—</strong><small id="usersLabel">users</small></div><div><strong id="adminTasks">—</strong><small id="totalTasksLabel">habits</small></div></div><div class="setting-card"><div><strong id="maintenanceName">Maintenance mode</strong><small id="maintenanceHint">Pause bot actions for regular users</small></div><button id="maintenanceToggle" class="setting-action" type="button">Off</button></div></section>
+    </section>
+
+    <section class="screen" id="screen-help">
+      <div class="section-head"><div><p class="eyebrow" id="helpEyebrow">QUICK GUIDE</p><h2 id="helpHeading">How to use</h2></div></div>
+      <section class="help-list">
+        <article><span>1</span><div><strong id="helpStep1Title">Add a habit</strong><p id="helpStep1">Tap the + button and enter a short habit name.</p></div></article>
+        <article><span>2</span><div><strong id="helpStep2Title">Check in daily</strong><p id="helpStep2">Open Today and tap a circle when you finish a habit.</p></div></article>
+        <article><span>3</span><div><strong id="helpStep3Title">Track your week</strong><p id="helpStep3">Use Goals and Stats to see your progress.</p></div></article>
+        <article><span>4</span><div><strong id="helpStep4Title">Set reminders</strong><p id="helpStep4">Choose one or more reminder times in More.</p></div></article>
+      </section>
     </section>
   </main>
+
   <nav class="bottom-nav" aria-label="Main navigation">
-    <button class="nav-item active" data-tab="home"><span>⌂</span><small id="navHome">Home</small></button>
-    <button class="nav-item active" data-tab="today"><span>☀️</span><small id="navToday">Today</small></button>
-    <button class="nav-item" data-tab="tasks"><span>☑️</span><small id="navTasks">Tasks</small></button>
-    <button class="nav-item" data-tab="goals"><span>🎯</span><small id="navGoals">Goals</small></button>
-    <button class="nav-item" data-tab="settings"><span>⚙️</span><small id="navSettings">Settings</small></button>
+    <button class="nav-item active" data-tab="home" type="button"><span>⌂</span><small id="navHome">Home</small></button>
+    <button class="nav-item" data-tab="today" type="button"><span>☀️</span><small id="navToday">Today</small></button>
+    <button class="nav-item" data-tab="tasks" type="button"><span>☑️</span><small id="navTasks">Habits</small></button>
+    <button class="nav-item" data-tab="more" type="button"><span>⋯</span><small id="navMore">More</small></button>
   </nav>
-  <div id="editDialog" class="dialog-backdrop" hidden><section class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialogTitle"><button id="closeDialog" class="dialog-close" aria-label="Close">×</button><p class="eyebrow" id="dialogEyebrow">YOUR ROUTINE</p><h2 id="dialogTitle">Edit habit</h2><label id="habitLabel" for="editInput">Habit name</label><input id="editInput" maxlength="80" autocomplete="off"><p id="dialogError" class="dialog-error" aria-live="polite"></p><div class="dialog-actions"><button id="deleteBtn" class="delete-action">Delete</button><span></span><button id="cancelEdit" class="cancel-action">Cancel</button><button id="saveEdit" class="save-action">Save</button></div></section></div>
+
+  <div id="editDialog" class="dialog-backdrop" hidden><section class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialogTitle"><button id="closeDialog" class="dialog-close" type="button" aria-label="Close">×</button><p class="eyebrow" id="dialogEyebrow">YOUR ROUTINE</p><h2 id="dialogTitle">Edit habit</h2><label id="habitLabel" for="editInput">Habit name</label><input id="editInput" maxlength="80" autocomplete="off"><p id="dialogError" class="dialog-error" aria-live="polite"></p><div class="dialog-actions"><button id="deleteBtn" class="delete-action" type="button">Delete</button><span></span><button id="cancelEdit" class="cancel-action" type="button">Cancel</button><button id="saveEdit" class="save-action" type="button">Save</button></div></section></div>
   <div class="toast" id="toast" role="status"></div>
   <script src="/webapp/app.js"></script>
-</body></html>
+</body>
+</html>

@@ -18,9 +18,9 @@ Besides typing commands, you now get two menus:
 
 ## Telegram Mini App
 
-The project includes a bilingual Mini App at `/app` (the service root `/` redirects there). It has Today, Tasks, Goals, and Settings tabs, supports add/check/edit/delete, weekly-goal editing, and shows streaks and progress. Admin-only tools appear in Settings for the configured `ADMIN_CHAT_ID`. The old password-protected web dashboard is now at `/admin`.
+The project includes a bilingual Mini App at `/app` (the service root `/` redirects there). Its simple mobile navigation has Home, Today, Habits, and More. Users can add/check/edit/delete habits, set weekly goals and reminder times, review a 7-day chart, switch English/Khmer, and export history to Excel. The Khmer Calendar card opens the requested source site. Admin-only tools appear in Settings for the configured `ADMIN_CHAT_ID`. The old password-protected web dashboard is at `/admin`.
 
-The Mini App opens on a dedicated **Home** menu with welcome copy, today's completion and streak summaries, and direct cards for Today, Habits, Goals, and Settings. All menu and tab labels are available in English and Khmer.
+The Mini App opens on a dedicated **Home** menu with welcome copy, today's completion and streak summaries, and direct cards for Today, Habits, Goals, Stats, Reminders, Export, Khmer Calendar, Settings, and Help. All menu and tab labels are available in English and Khmer.
 
 The Telegram chat menu keeps frequent actions on its main screen and groups reminder times, Excel export, language, and help under **More**.
 
@@ -33,6 +33,10 @@ Check-in history now enforces one row per task per local date. Existing duplicat
 Set `BOT_TOKEN` and a strong, private `DASHBOARD_PASSWORD` in your host's environment settings. On Render, the bot stops at startup if the dashboard password is missing; local development generates a temporary password and prints it in the startup log. Optional settings: `ADMIN_CHAT_ID` (numeric Telegram chat ID), `TURSO_DATABASE_URL`, and `TURSO_AUTH_TOKEN`.
 
 ## Changelog
+
+- **Improved:** Mini App navigation and mobile layout, with clearer Home, Today,
+  Habits, and More sections, a weekly progress chart, reminder management,
+  export shortcuts, and visible Telegram connection errors.
 
 - **Added:** a dedicated Mini App Home menu with quick links into Today,
   Habits, Weekly Goals, and Settings, plus daily progress summaries. The menu
